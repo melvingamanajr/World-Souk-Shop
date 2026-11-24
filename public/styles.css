@@ -404,7 +404,7 @@ th { background: #ecf0e5; }
 .cart-row input { width: 5rem; }
 .cart-total { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: 1rem 0 0; }
 .dialog-section { margin-top: 1.4rem; border-top: 1px solid var(--line); padding-top: 1rem; }
-.form-error, .role-fields { grid-column: 1 / -1; }
+.form-error, .form-note, .role-fields { grid-column: 1 / -1; }
 .role-fields { margin: 0; padding: .75rem; min-width: 0; border: 1px solid var(--line); border-radius: .4rem; }
 .role-fields legend { padding-inline: .25rem; font-weight: 700; }
 .workspace-toolbar, .form-grid + .table-wrap, .form-grid + .empty-state, details + .table-wrap { margin-top: 1rem; }

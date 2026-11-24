@@ -30,8 +30,16 @@ The broker smoke check uses a fresh in-memory SQLite database. It commits two sy
 
 For an MSK Serverless deployment, set `WSS_KAFKA_SECURITY=iam`, use the cluster's IAM bootstrap broker output from Terraform, and set the correct region. The AWS SDK default credential chain supports a role supplied through EKS Pod Identity. Provision the topic with a separate operator role and grant the relay role connection, topic describe, and topic write permissions on that cluster and topic. The client uses verified TLS certificates. [AWS MSK IAM signer](https://github.com/aws/aws-msk-iam-sasl-signer-js) · [MSK IAM permissions](https://docs.aws.amazon.com/msk/latest/developerguide/kafka-actions.html)
 
+From a host that can reach the private brokers, assume the topic operator role and use the same IAM connection settings to create the topic. `WSS_KAFKA_PARTITIONS` sets the desired count for a new topic and defaults to three. Existing topics keep their partition count.
+
+```sh
+npm run topic:ensure --prefix infra/kafka
+```
+
 ## Delivery behavior
 
 The JSON message envelope carries `id`, `eventType`, `aggregateId`, `occurredAt`, `schemaVersion`, and `payload`. `aggregateId` is the Kafka key. Consumers can use `id` or the `event-id` header to deduplicate. Keep partition assignments stable when ordering across an aggregate's history matters. [KafkaJS producer configuration](https://kafka.js.org/docs/producing)
 
 The producer waits for all in-sync replicas and disables automatic topic creation. A crash or interrupted response between Kafka accepting a record and the relay marking it published can result in replay. Consumers should persist processed event IDs in the same transaction as their projection updates. Monitor pending event count, age of the oldest pending event, consecutive publishing failures, and gaps in successful publication.
+
+KafkaJS 2.2.4 can emit `TimeoutNegativeWarning` on Node 24 because of its request-queue timer. The local broker smoke check completed despite the warning. Include idle relay CPU in deployment load checks. [KafkaJS tracker](https://github.com/tulios/kafkajs/issues/1751)

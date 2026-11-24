@@ -117,7 +117,7 @@ resource "aws_iam_role" "pod" {
       Principal = { Service = "pods.eks.amazonaws.com" }
       Condition = {
         StringEquals = {
-          "aws:RequestTag/eks-cluster-name"            = local.name
+          "aws:RequestTag/eks-cluster-name"           = local.name
           "aws:RequestTag/kubernetes-namespace"       = each.value.namespace
           "aws:RequestTag/kubernetes-service-account" = each.value.service_account
         }

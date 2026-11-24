@@ -10,7 +10,7 @@ mock_provider "aws" {
   }
 
   mock_data "aws_route_table" {
-    defaults = { routes = [{ gateway_id = "local" }] }
+    defaults = { id = "rtb-0123456789abcdef0", routes = [{ gateway_id = "local" }] }
   }
 
   mock_data "aws_security_group" {
@@ -19,6 +19,22 @@ mock_provider "aws" {
 
   mock_data "aws_msk_bootstrap_brokers" {
     defaults = { bootstrap_brokers_sasl_iam = "boot-test.kafka-serverless.ap-southeast-1.amazonaws.com:9098" }
+  }
+
+  mock_resource "aws_iam_role" {
+    defaults = { arn = "arn:aws:iam::123456789012:role/test-foundation-role" }
+  }
+
+  mock_resource "aws_security_group" {
+    defaults = { id = "sg-0123456789abcdef1" }
+  }
+
+  mock_resource "aws_eks_cluster" {
+    defaults = { vpc_config = { cluster_security_group_id = "sg-0123456789abcdef2" } }
+  }
+
+  mock_resource "aws_launch_template" {
+    defaults = { id = "lt-0123456789abcdef0", latest_version = 1 }
   }
 
   mock_resource "aws_msk_serverless_cluster" {
@@ -31,7 +47,7 @@ variables {
   aws_account_id             = "123456789012"
   environment                = "test"
   vpc_id                     = "vpc-0123456789abcdef0"
-  private_subnet_ids          = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+  private_subnet_ids         = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
   operator_role_arn          = "arn:aws:iam::123456789012:role/test-operator"
   operator_security_group_id = "sg-0123456789abcdef0"
 }
@@ -57,7 +73,7 @@ override_data {
 }
 
 run "private_foundation" {
-  command = plan
+  command = apply
 
   assert {
     condition     = aws_eks_cluster.foundation.vpc_config[0].endpoint_private_access && !aws_eks_cluster.foundation.vpc_config[0].endpoint_public_access

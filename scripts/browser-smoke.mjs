@@ -73,6 +73,11 @@ try {
   const click = selector => evalPage(`${q(selector)}.click()`);
   const wait = (expression, label) => until(() => evalPage(expression), label);
   const change = (selector, value) => evalPage(`(() => { const item = ${q(selector)}; item.value = ${JSON.stringify(value)}; item.dispatchEvent(new Event('change', {bubbles:true})); })()`);
+  async function fill(form, fields) {
+    for (const [name, value] of Object.entries(fields)) {
+      await evalPage(`${q(`${form} [name=${name}]`)}.value = ${JSON.stringify(value)}`);
+    }
+  }
   const viewport = width => command('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false });
 
   await command('Page.enable');
@@ -103,9 +108,7 @@ try {
   await click('[data-action=checkout]');
   await click('[data-id=CONSUMER][data-action=demo-role]');
   await wait(q('form[data-form=checkout]') + ' !== null', 'shipping form');
-  for (const [field, value] of Object.entries({ address: '10 Test Lane', city: 'Cebu', postalCode: '6000', country: 'Philippines' })) {
-    await evalPage(`${q(`form[data-form=checkout] [name=${field}]`)}.value = ${JSON.stringify(value)}`);
-  }
+  await fill('form[data-form=checkout]', { address: '10 Test Lane', city: 'Cebu', postalCode: '6000', country: 'Philippines' });
   await click('form[data-form=checkout] button[type=submit]');
   await wait(q('[data-action=order-detail]') + ' !== null', 'order history');
   await click('[data-action=order-detail]');
@@ -135,13 +138,56 @@ try {
   await click('[data-action=order-detail]');
   await wait(`${q('#shop-dialog-body')}.textContent.includes('WSS-SMOKE-1')`, 'shopper shipment timeline');
   await click('#dialog-close');
+
+  const applicantEmail = 'smoke-applicant@example.test';
+  const initialPassword = 'a synthetic browser test password';
+  const updatedPassword = 'a synthetic replacement browser password';
+  await click('#signin-button');
+  await click('[data-action=switch-role]');
+  await click('[data-action=register]');
+  await fill('form[data-form=register]', { name: 'Smoke Applicant', email: applicantEmail, password: initialPassword });
+  await click('[name=acceptPrivacy]');
+  await click('form[data-form=register] button[type=submit]');
+  await wait(`${q('#portal h2')}?.textContent === 'Orders & rewards' && !${q('#shop-dialog')}.open`, 'registered shopper session');
+  await click('#signin-button');
+  await click('[data-action=change-password]');
+  await fill('form[data-form=change-password]', { currentPassword: initialPassword, newPassword: updatedPassword, confirmPassword: updatedPassword });
+  await click('form[data-form=change-password] button[type=submit]');
+  await wait(`${q('#toast-status')}.textContent === 'Password updated.'`, 'password change');
+  await click('#signin-button');
+  await click('[data-action=workspace][data-id=memberships]');
+  await wait(q('form[data-form=apply-membership]') + ' !== null', 'applicant pre-survey');
+  await change('form[data-form=apply-membership] [name=requestedRole]', 'MANUFACTURER');
+  await fill('form[data-form=apply-membership]', { companyName: 'Smoke Manufacturing', countryCode: 'PH',
+    businessSummary: 'Small-batch manufacturing', productionCapacity: '250', qualityControls: 'Lot-level inspections', complianceReference: 'Demo registry reference' });
+  await click('form[data-form=apply-membership] button[type=submit]');
+  await wait(`${q('#portal')}.textContent.includes('Passed form checks')`, 'recorded pre-screening');
+  await click('#signin-button');
+  await click('[data-action=switch-role]');
+  await click('[data-id=ADMIN][data-action=demo-role]');
+  await wait(q('[data-action=review-membership]') + ' !== null', 'admin review queue');
+  await click('[data-action=review-membership]');
+  assert.equal(await evalPage(`${q('[name=verificationConfirmed]')}.required`), true);
+  assert.equal(await evalPage(`${q('[name=verificationConfirmed]')}.checked`), false);
+  await click('[name=verificationConfirmed]');
+  await click('form[data-form=review-membership] button[type=submit]');
+  await wait(`${q('#portal')}.textContent.includes('Supporting records confirmed')`, 'confirmed review');
+  await click('#signin-button');
+  await click('[data-action=switch-role]');
+  await fill('form[data-form=login]', { email: applicantEmail, password: updatedPassword });
+  await click('form[data-form=login] button[type=submit]');
+  await wait(`${q('#portal h2')}?.textContent === 'Manufacturer hub'`, 'newly approved manufacturer sign-in');
+  await click('#signin-button');
+  await click('[data-action=logout-all]');
+  await click('[data-action=confirm-logout-all]');
+  await wait(`${q('#signin-button')}.textContent === 'Sign in'`, 'revoked sessions');
   for (const width of [390, 320]) {
     await viewport(width);
     await wait(`innerWidth === ${width}`, 'mobile viewport');
     assert.ok(await evalPage('document.documentElement.scrollWidth <= innerWidth'), `page overflow at ${width}px`);
   }
   assert.deepEqual(errors, [], 'browser runtime errors');
-  console.log('Chromium smoke passed: storefront, keyboard focus, filtering, translation, checkout, role switching and shipment tracking at desktop and mobile widths.');
+  console.log('Chromium smoke passed: shopping, shipment tracking, account controls, membership review, keyboard focus and desktop and mobile layout.');
 } finally {
   socket?.close();
   if (browser.exitCode === null && browser.pid) {

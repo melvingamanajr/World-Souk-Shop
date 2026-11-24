@@ -39,7 +39,7 @@ async function loadModule(name) {
   }
 }
 
-async function connectProducer(settings, env) {
+async function createKafkaClient(settings, env, clientId) {
   const { Kafka, logLevel } = await loadModule('kafkajs');
   let sasl;
 
@@ -57,10 +57,10 @@ async function connectProducer(settings, env) {
     sasl = { mechanism: 'scram-sha-512', username: env.WSS_KAFKA_USERNAME, password: env.WSS_KAFKA_PASSWORD };
   }
 
-  const kafka = new Kafka({
-    clientId: 'world-souk-outbox',
+  return new Kafka({
+    clientId,
     brokers: settings.brokers,
-    ssl: settings.security !== 'local',
+    ssl: settings.security === 'local' ? false : { minVersion: 'TLSv1.2', rejectUnauthorized: true },
     sasl,
     connectionTimeout: 3000,
     authenticationTimeout: 5000,
@@ -68,6 +68,10 @@ async function connectProducer(settings, env) {
     retry: { retries: 2, initialRetryTime: 250, maxRetryTime: 1000 },
     logLevel: logLevel.NOTHING,
   });
+}
+
+async function connectProducer(settings, env) {
+  const kafka = await createKafkaClient(settings, env, 'world-souk-outbox');
   const producer = kafka.producer({ allowAutoTopicCreation: false, maxInFlightRequests: 1 });
   try {
     await producer.connect();
@@ -75,6 +79,23 @@ async function connectProducer(settings, env) {
   } catch (error) {
     await producer.disconnect().catch(() => {});
     throw error;
+  }
+}
+
+export async function ensureKafkaTopic(env = process.env) {
+  const settings = readKafkaSettings(env);
+  const partitions = Number(env.WSS_KAFKA_PARTITIONS || '3');
+  if (!Number.isInteger(partitions) || partitions < 1 || partitions > 1024) {
+    throw new Error('WSS_KAFKA_PARTITIONS must be an integer between 1 and 1024.');
+  }
+  const kafka = await createKafkaClient(settings, env, 'world-souk-topic-operator');
+  const admin = kafka.admin();
+  try {
+    await admin.connect();
+    const created = await admin.createTopics({ topics: [{ topic: settings.topic, numPartitions: partitions }] });
+    return { topic: settings.topic, created };
+  } finally {
+    await admin.disconnect();
   }
 }
 

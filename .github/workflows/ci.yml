@@ -39,3 +39,63 @@ jobs:
           container="$(docker run --detach --publish 127.0.0.1:13000:3000 --env WSS_PUBLIC_ORIGIN=https://shop.example.test world-souk:ci)"
           trap 'docker logs "$container"; docker rm --force --volumes "$container" >/dev/null' EXIT
           curl --fail --silent --show-error --retry 15 --retry-connrefused --retry-delay 1 http://127.0.0.1:13000/healthz
+
+  phase-1-integrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.x'
+          package-manager-cache: false
+      - name: Apply PostgreSQL migrations
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          for migration in infra/postgres/*.sql; do
+            docker exec -i "$POSTGRES_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 --single-transaction --file=- < "$migration"
+          done
+      - name: Install Kafka transport
+        run: npm ci --prefix infra/kafka --ignore-scripts
+      - name: Verify relay against Kafka
+        run: |
+          docker compose -f infra/kafka/compose.yml up -d --wait broker
+          docker compose -f infra/kafka/compose.yml run --rm topic-init
+          npm run test:broker --prefix infra/kafka
+      - name: Stop integration broker
+        if: always()
+        run: docker compose -f infra/kafka/compose.yml down --volumes
+      - name: Build outbox image
+        run: docker build --target outbox --tag world-souk-outbox:ci .
+
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: '1.14.1'
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+      - run: terraform test -no-color

@@ -127,12 +127,15 @@ test('the screening migration preserves recorded decisions and checks older pend
   const reviewer = user(db, 'reviewer', 'ADMIN');
   const customer = user(db, 'customer');
   const carrier = user(db, 'carrier');
+  const invalidCarrier = user(db, 'invalid-carrier');
   const insert = db.prepare(`INSERT INTO membership_applications (id, applicant_id, requested_role, company_name, country_code,
     business_summary, transport_regions, cold_chain, warehousing, status, reviewed_at, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const createdAt = '2026-10-31T12:00:00.000Z';
   insert.run('legacy-consumer', customer.id, 'CONSUMER', 'Legacy Customer', 'PH', '', '', null, '', 'APPROVED', createdAt, createdAt);
   insert.run('legacy-freight', carrier.id, freight.requestedRole, freight.companyName, freight.countryCode, freight.businessSummary,
+    freight.transportRegions, 0, freight.warehousing, 'PENDING', null, createdAt);
+  insert.run('legacy-invalid', invalidCarrier.id, freight.requestedRole, freight.companyName, 'ZZ', freight.businessSummary,
     freight.transportRegions, 0, freight.warehousing, 'PENDING', null, createdAt);
   apply('005-membership-screening.sql');
   const operations = createOperations(db);
@@ -144,5 +147,10 @@ test('the screening migration preserves recorded decisions and checks older pend
   assert.equal(approved.verificationConfirmed, true);
   assert.equal(approved.screening.version, 1);
   assert.ok(approved.screening.checks.includes('COLD_CHAIN_DECLARED'));
+  assert.throws(() => operations.reviewMembership(reviewer, 'legacy-invalid', verifiedApproval), status(422));
+  assert.equal(operations.reviewMembership(reviewer, 'legacy-invalid', {
+    decision: 'REJECTED', note: 'Supply a valid country or territory code.'
+  }).status, 'REJECTED');
+  assert.equal(db.prepare('SELECT role FROM users WHERE id = ?').get(invalidCarrier.id).role, 'CONSUMER');
   assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
 });

@@ -8,6 +8,12 @@
 !public/**
 !scripts/
 !scripts/backup.mjs
+!scripts/bootstrap-admin.mjs
+!infra/
+!infra/kafka/
+!infra/kafka/package.json
+!infra/kafka/package-lock.json
+!infra/kafka/transport.mjs
 **/.env*
 **/*.sqlite
 **/*.sqlite-*

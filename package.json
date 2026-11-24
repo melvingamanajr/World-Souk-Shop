@@ -8,6 +8,9 @@
     "start": "node src/server.mjs",
     "demo": "node src/server.mjs --demo",
     "test": "node --test",
-    "backup": "node scripts/backup.mjs"
+    "backup": "node scripts/backup.mjs",
+    "admin:bootstrap": "node scripts/bootstrap-admin.mjs",
+    "outbox": "node src/outbox-worker.mjs",
+    "outbox:status": "node src/outbox-worker.mjs --status"
   }
 }

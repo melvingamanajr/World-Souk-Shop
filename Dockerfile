@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim
+FROM node:24-bookworm-slim AS base
 
 WORKDIR /app
 ENV NODE_ENV=production \
@@ -11,8 +11,17 @@ COPY package.json ./
 COPY src/ ./src/
 COPY db/ ./db/
 COPY public/ ./public/
-COPY scripts/backup.mjs ./scripts/backup.mjs
+COPY scripts/backup.mjs scripts/bootstrap-admin.mjs ./scripts/
 
+FROM base AS outbox
+COPY infra/kafka/package.json infra/kafka/package-lock.json ./infra/kafka/
+RUN npm ci --prefix infra/kafka --omit=dev --ignore-scripts
+COPY infra/kafka/transport.mjs ./infra/kafka/
+USER node
+VOLUME ["/data"]
+CMD ["node", "src/outbox-worker.mjs"]
+
+FROM base AS app
 USER node
 VOLUME ["/data"]
 EXPOSE 3000

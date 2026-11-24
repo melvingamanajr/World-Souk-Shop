@@ -53,7 +53,7 @@ resource "aws_iam_role_policy" "outbox" {
     Statement = [
       {
         Effect   = "Allow"
-        Action   = ["kafka-cluster:Connect", "kafka-cluster:DescribeCluster", "kafka-cluster:WriteDataIdempotently"]
+        Action   = ["kafka-cluster:Connect", "kafka-cluster:DescribeCluster"]
         Resource = local.kafka_cluster_arn
       },
       {
@@ -99,7 +99,7 @@ resource "aws_iam_role_policy" "topic_operator" {
       },
       {
         Effect   = "Allow"
-        Action   = ["kafka-cluster:CreateTopic", "kafka-cluster:DescribeTopic", "kafka-cluster:DescribeTopicDynamicConfiguration"]
+        Action   = ["kafka-cluster:CreateTopic", "kafka-cluster:DescribeTopic"]
         Resource = local.kafka_topic_arn
       }
     ]

@@ -205,7 +205,7 @@ function showSignIn(register = false) {
   modal('sign-in', register ? 'Create an account' : 'Sign in', `<form class="form-grid" data-form="${register ? 'register' : 'login'}">
     ${register ? field('name', 'Full name', 'required minlength="2" maxlength="100" autocomplete="name"') : ''}
     ${field('email', 'Email', 'required type="email" maxlength="254" autocomplete="email"')}
-    ${field('password', 'Password', `required type="password" maxlength="128" autocomplete="${register ? 'new-password' : 'current-password'}" ${register ? 'minlength="12"' : ''}`)}
+    ${field('password', 'Password', `required type="password" maxlength="128" autocomplete="${register ? 'new-password' : 'current-password'}" ${register ? 'minlength="15"' : ''}`)}
     ${register ? `<label class="check-label"><input type="checkbox" name="acceptPrivacy" required> ${txt('I have read the privacy notice.')}</label>` : ''}
     ${formMessage}<div class="form-actions">${submit(register ? 'Create an account' : 'Sign in')}${button(register ? 'Sign in' : 'Create an account', register ? 'login' : 'register')}${button('Privacy notice', 'privacy-notice')}</div>
   </form>${config.demo ? `<div class="dialog-section"><h3>${txt('Demo roles')}</h3><p>${txt('Try a seeded account with sample data.')}</p><div class="toolbar">${Object.entries(roleNames).map(([role, title]) => button(title, 'demo-role', role)).join('')}</div></div>` : ''}`);
@@ -217,7 +217,24 @@ function showAccount() {
     <div class="toolbar">${user.role === 'CONSUMER' ? '' : button('Open workspace', 'workspace', ({ MANUFACTURER: 'manufacturer', FREIGHT_PARTNER: 'freight', ADMIN: 'admin' })[user.role], 'primary')}
     ${button('Orders & rewards', 'workspace', 'orders', user.role === 'CONSUMER' ? 'primary' : 'secondary')}
     ${button('Membership', 'workspace', 'memberships')}${button('Referrals', 'workspace', 'referrals')}${button('Data & privacy', 'workspace', 'privacy')}
-    ${button('Sign out', 'logout')}${config.demo ? button('Switch demo role', 'switch-role') : ''}</div>`);
+    ${button('Sign out', 'logout')}${!user.id.startsWith('demo-') ? button('Change password', 'change-password') + button('Sign out everywhere', 'logout-all') : ''}
+    ${config.demo ? button('Switch demo role', 'switch-role') : ''}</div>`);
+}
+
+function changePassword() {
+  if (!authenticate(changePassword)) return;
+  modal('change-password', 'Change password', `<form class="form-grid" data-form="change-password">
+    ${field('currentPassword', 'Current password', 'required type="password" maxlength="128" autocomplete="current-password"')}
+    ${field('newPassword', 'New password', 'required type="password" minlength="15" maxlength="128" autocomplete="new-password"')}
+    ${field('confirmPassword', 'Confirm new password', 'required type="password" minlength="15" maxlength="128" autocomplete="new-password"')}
+    <p class="form-note">${txt('Use at least 15 characters. Changing your password signs out your other sessions.')}</p>${formMessage}
+    <div class="form-actions">${submit('Update password')}</div></form>`);
+}
+
+async function logout(path) {
+  await api(`/api/session/${path}`, { method: 'POST' });
+  user = null; view = undefined; afterSignIn = undefined; retryDetails = undefined;
+  portal.hidden = true; portal.replaceChildren(); syncAccount(); dialog.close(); notify('Signed out.');
 }
 
 function showJoin(id) {
@@ -291,16 +308,22 @@ const actions = {
   checkout: () => showCheckout(), login: () => showSignIn(), register: () => showSignIn(true),
   'privacy-notice': privacyNotice, workspace: openPortal, 'switch-role': () => showSignIn(),
   'demo-role': async role => signedIn(await api('/api/session/demo', { method: 'POST', body: { role } })),
-  logout: async () => {
-    await api('/api/session/logout', { method: 'POST' });
-    user = null; view = undefined; afterSignIn = undefined; retryDetails = undefined;
-    portal.hidden = true; portal.replaceChildren(); syncAccount(); dialog.close(); notify('Signed out.');
-  }
+  'change-password': changePassword,
+  'logout-all': () => modal('logout-all', 'Sign out everywhere', `<p>${txt('This signs you out of World Souk & Shop on every browser and device.')}</p>
+    ${button('Sign out everywhere', 'confirm-logout-all', '', 'primary')}`),
+  'confirm-logout-all': () => logout('logout-all'),
+  logout: () => logout('logout')
 };
 
 const forms = {
   login: async (_form, values) => signedIn(await api('/api/session/login', { method: 'POST', body: values })),
   register: async (_form, values) => signedIn(await api('/api/session/register', { method: 'POST', body: { ...values, acceptPrivacy: values.acceptPrivacy === 'on' } })),
+  'change-password': async (_form, { currentPassword, newPassword, confirmPassword }) => {
+    if (newPassword !== confirmPassword) throw new Error('New passwords do not match.');
+    const result = await api('/api/session/password', { method: 'PATCH', body: { currentPassword, newPassword } });
+    user = result.user;
+    syncAccount(); dialog.close(); notify('Password updated.');
+  },
   join: (form, values) => {
     const pool = pools.find(row => row.id === form.dataset.id);
     if (!pool) return;

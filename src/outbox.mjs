@@ -52,10 +52,10 @@ export function createOutboxRelay(db, transport, {
   async function runOnce() {
     if (!transport) throw new TypeError('A Kafka transport is required to publish events.');
     const leaseId = randomUUID();
-    const now = clock();
     // The read-only check avoids taking a writer lock on an empty queue.
     if (!readPending.get(1)) return { status: 'idle', count: 0 };
     const batch = transaction(db, () => {
+      const now = clock();
       const current = state.get();
       if (current.retry_at_ms > now) return { status: 'retry', count: 0, retryAt: isoTime(current.retry_at_ms) };
       if (!claim.run(leaseId, now + leaseMs, now, now).changes) return { status: 'busy', count: 0 };

@@ -13,7 +13,7 @@ The stack covers AWS infrastructure and workload identity. The application and r
 
 ## Validate and plan
 
-Run the following from `infra/terraform` with Terraform 1.10 or later. Initialization downloads the pinned AWS provider. Tests use a mocked provider and need no AWS session.
+Run the following from `infra/terraform` with Terraform 1.11 or later. Initialization downloads the pinned AWS provider. Tests use a mocked provider and need no AWS session.
 
 ```sh
 terraform init -backend=false
@@ -33,23 +33,14 @@ Review the target account, region, network visibility, IAM policies, and costs b
 
 ## Create the event topic
 
-MSK Serverless topic creation uses Kafka's admin protocol. From the VPC-based operator host, use an AWS CLI profile that assumes the role in `kafka_topic_operator_role_arn` with the platform operator profile as the source. Install a Kafka admin client and the [AWS MSK IAM Java library](https://github.com/aws/aws-msk-iam-auth) on that host, following the [AWS Serverless topic guide](https://docs.aws.amazon.com/msk/latest/developerguide/msk-serverless-create-topic.html).
+MSK Serverless topic creation uses Kafka's admin protocol. From the VPC-based operator host, configure a named AWS profile that assumes the role in `kafka_topic_operator_role_arn` with the platform operator profile as its source. Use the temporary credentials from this profile for the topic creation command. [AWS Serverless topic guide](https://docs.aws.amazon.com/msk/latest/developerguide/msk-serverless-create-topic.html)
 
-Configure its `client.properties` with the temporary-credential profile. This file contains routing and authentication settings, without access keys.
-
-```properties
-security.protocol=SASL_SSL
-sasl.mechanism=AWS_MSK_IAM
-sasl.jaas.config=software.amazon.msk.auth.iam.IAMLoginModule required awsProfileName="wss-topic-operator" awsAddDefaultProviders="false";
-sasl.client.callback.handler.class=software.amazon.msk.auth.iam.IAMClientCallbackHandler
-```
-
-Use the private bootstrap broker string and topic from the relay environment output.
+From the repository root, read the `kafka_relay_environment` output and export its four values in the current shell. The output contains connection settings and the topic name.
 
 ```sh
-terraform output -json kafka_relay_environment
-kafka-topics.sh --bootstrap-server "$WSS_KAFKA_BROKERS" --command-config client.properties \
-  --create --if-not-exists --topic "$WSS_KAFKA_TOPIC" --partitions 6
+terraform -chdir=infra/terraform output -json kafka_relay_environment
+npm ci --prefix infra/kafka
+AWS_PROFILE=wss-topic-operator npm run topic:ensure --prefix infra/kafka
 ```
 
-Configure the relay with the output environment, use the `wss` namespace and `wss-outbox` service account on EKS, and allow the SDK to resolve credentials via Pod Identity. Keep the partition count stable while replaying events so a given key keeps its partition. Route topic creation commands through the operator role, then use the producer role for steady-state delivery.
+Configure the relay with the same output environment, use the `wss` namespace and `wss-outbox` service account on EKS, and allow the SDK to resolve credentials via Pod Identity. Choose the partition count before the initial create and keep it stable so an aggregate key keeps its partition. Route topic creation commands through the operator role, then use the producer role for steady-state delivery.
