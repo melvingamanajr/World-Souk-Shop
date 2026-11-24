@@ -206,6 +206,8 @@ function showSignIn(register = false) {
     ${register ? field('name', 'Full name', 'required minlength="2" maxlength="100" autocomplete="name"') : ''}
     ${field('email', 'Email', 'required type="email" maxlength="254" autocomplete="email"')}
     ${field('password', 'Password', `required type="password" maxlength="128" autocomplete="${register ? 'new-password' : 'current-password'}" ${register ? 'minlength="15"' : ''}`)}
+    ${register ? '' : `<label data-operator-otp hidden>${txt('Authenticator or recovery code')}
+      <input name="otp" required disabled autocomplete="one-time-code" autocapitalize="off" spellcheck="false" maxlength="64"></label>`}
     ${register ? `<label class="check-label"><input type="checkbox" name="acceptPrivacy" required> ${txt('I have read the privacy notice.')}</label>` : ''}
     ${formMessage}<div class="form-actions">${submit(register ? 'Create an account' : 'Sign in')}${button(register ? 'Sign in' : 'Create an account', register ? 'login' : 'register')}${button('Privacy notice', 'privacy-notice')}</div>
   </form>${config.demo ? `<div class="dialog-section"><h3>${txt('Demo roles')}</h3><p>${txt('Try a seeded account with sample data.')}</p><div class="toolbar">${Object.entries(roleNames).map(([role, title]) => button(title, 'demo-role', role)).join('')}</div></div>` : ''}`);
@@ -316,7 +318,19 @@ const actions = {
 };
 
 const forms = {
-  login: async (_form, values) => signedIn(await api('/api/session/login', { method: 'POST', body: values })),
+  login: async (form, values) => {
+    try { await signedIn(await api('/api/session/login', { method: 'POST', body: values })); }
+    catch (error) {
+      if (['MFA_REQUIRED', 'INVALID_MFA_CODE'].includes(error.code)) {
+        const otp = $('[name=otp]', form);
+        otp.parentElement.hidden = false;
+        otp.disabled = false;
+        otp.value = '';
+        otp.focus();
+      }
+      throw error;
+    }
+  },
   register: async (_form, values) => signedIn(await api('/api/session/register', { method: 'POST', body: { ...values, acceptPrivacy: values.acceptPrivacy === 'on' } })),
   'change-password': async (_form, { currentPassword, newPassword, confirmPassword }) => {
     if (newPassword !== confirmPassword) throw new Error('New passwords do not match.');

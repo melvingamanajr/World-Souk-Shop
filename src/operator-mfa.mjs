@@ -37,7 +37,7 @@ function encodeSeed(seed) {
 }
 
 function decodeSeed(encoded) {
-  if (typeof encoded !== 'string' || !/^[A-Z2-7]{32}$/.test(encoded)) {
+  if (typeof encoded !== 'string' || encoded.length !== 32 || !/^[A-Z2-7]{32}$/.test(encoded)) {
     throw new HttpError(422, 'Use the authenticator secret generated for this enrollment.', 'INVALID_MFA_SECRET');
   }
   const seed = Buffer.alloc(seedBytes);
@@ -152,7 +152,7 @@ export function createOperatorMfa(db, { key, clock = Date.now } = {}) {
       const parameters = new URLSearchParams({ secret, issuer, algorithm: 'SHA1', digits: '6', period: '30' });
       return { secret, uri: `otpauth://totp/${label}?${parameters}` };
     },
-    enroll(userId, { secret, code }) {
+    enroll(userId, { secret, code, replaceExisting = true }) {
       if (!encryptionKey) throw unavailable();
       const seed = decodeSeed(secret);
       try {
@@ -162,6 +162,7 @@ export function createOperatorMfa(db, { key, clock = Date.now } = {}) {
           const step = matchingStep(seed, codeInput(code), timestamp);
           if (step === null) throw new HttpError(422, 'Enter a current code from the authenticator.', 'INVALID_MFA_CODE');
           const replacing = Boolean(factorByUser.get(userId));
+          if (replacing && !replaceExisting) throw new HttpError(409, 'The operator already has an authenticator.', 'MFA_ALREADY_ENROLLED');
           const recoveryCodes = Array.from({ length: 10 }, randomRecoveryCode);
           saveFactor.run(userId, sealSeed(encryptionKey, seed, userId), step, timestamp);
           deleteRecoveryCodes.run(userId);

@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createApplication } from './application.mjs';
+import { parseOperatorMfaKey } from './operator-mfa.mjs';
 
 const { values } = parseArgs({ options: { demo: { type: 'boolean', default: false } } });
 const host = process.env.WSS_HOST ?? '127.0.0.1';
@@ -14,7 +15,10 @@ if (values.demo && !['127.0.0.1', '::1', 'localhost'].includes(host)) throw new 
 if (!values.demo && !['127.0.0.1', '::1', 'localhost'].includes(host) && !publicOrigin?.startsWith('https:')) {
   throw new Error('An HTTPS WSS_PUBLIC_ORIGIN is required when serving beyond loopback.');
 }
-const { server, commerce } = createApplication({ filename, demo: values.demo, commissionBps, publicOrigin });
+const requireAdminMfa = !values.demo && (process.env.WSS_REQUIRE_ADMIN_MFA === '1' || Boolean(publicOrigin?.startsWith('https:')));
+const operatorMfaKey = values.demo ? undefined : parseOperatorMfaKey(process.env.WSS_OPERATOR_MFA_KEY);
+if (requireAdminMfa && !operatorMfaKey) throw new Error('Set WSS_OPERATOR_MFA_KEY before enabling operator MFA.');
+const { server, commerce } = createApplication({ filename, demo: values.demo, commissionBps, publicOrigin, operatorMfaKey, requireAdminMfa });
 const maintenance = setInterval(() => {
   try { commerce.expirePools(); }
   catch (error) { console.error('Pool expiration failed', error.code ?? error.name); }

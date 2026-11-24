@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'no
 import { promisify } from 'node:util';
 import { HttpError } from './http-error.mjs';
 import { transaction } from './database.mjs';
+import { createOperatorMfa } from './operator-mfa.mjs';
 
 const derive = promisify(scrypt);
 const tokenLifetime = 60 * 60 * 12;
@@ -90,10 +91,11 @@ export async function bootstrapAdministrator(db, body) {
   });
 }
 
-export function createIdentity(db, { secureCookies, demo, clock = Date.now }) {
+export function createIdentity(db, { secureCookies, demo, clock = Date.now, operatorMfaKey, requireAdminMfa = false }) {
+  const operatorMfa = createOperatorMfa(db, { key: operatorMfaKey, clock });
   const userById = db.prepare('SELECT * FROM users WHERE id = ?');
   const userByEmail = db.prepare('SELECT * FROM users WHERE email = ?');
-  const findSession = db.prepare(`SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
+  const findSession = db.prepare(`SELECT u.*,s.operator_mfa_verified FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ? AND s.expires_at > ?`);
   const deleteSession = db.prepare('DELETE FROM sessions WHERE token_hash = ?');
   const deleteUserSessions = db.prepare('DELETE FROM sessions WHERE user_id = ?');
@@ -109,14 +111,14 @@ export function createIdentity(db, { secureCookies, demo, clock = Date.now }) {
     return match?.[1];
   }
 
-  function newSession(req, id) {
+  function newSession(req, id, operatorMfaVerified = false) {
     const token = randomBytes(32).toString('hex');
     const now = clock();
     const previous = sessionToken(req);
     if (previous) deleteSession.run(hashToken(previous));
     db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now);
-    db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
-      .run(hashToken(token), id, now + 1000 * tokenLifetime);
+    db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at, operator_mfa_verified) VALUES (?, ?, ?, ?)')
+      .run(hashToken(token), id, now + 1000 * tokenLifetime, Number(operatorMfaVerified));
     return { user: publicUser(userById.get(id)), cookie: cookie(token, tokenLifetime) };
   }
 
@@ -136,12 +138,19 @@ export function createIdentity(db, { secureCookies, demo, clock = Date.now }) {
 
   function invalidCredentials() { return new HttpError(401, 'Email or password is incorrect.', 'INVALID_CREDENTIALS'); }
 
+  function validSession(row) {
+    if (!row) return false;
+    if (isDemoAccount(row.id)) return demo;
+    if (row.role !== 'ADMIN') return true;
+    const enrolled = operatorMfa.isEnrolled(row.id);
+    return enrolled ? Boolean(operatorMfaKey && row.operator_mfa_verified) : !requireAdminMfa;
+  }
+
   return {
     user(req) {
       const token = sessionToken(req);
       const row = token ? findSession.get(hashToken(token), clock()) : undefined;
-      if (row && (demo || !isDemoAccount(row.id))) return publicUser(row);
-      return null;
+      return validSession(row) ? publicUser(row) : null;
     },
     async register(req, body) {
       const email = emailAddress(body.email);
@@ -170,13 +179,34 @@ export function createIdentity(db, { secureCookies, demo, clock = Date.now }) {
         throw invalidCredentials();
       }
       const upgradedHash = checked.legacy ? await hashPassword(body.password) : null;
-      return transaction(db, () => {
-        if (userById.get(account.id)?.password_hash !== account.password_hash) throw invalidCredentials();
+      const outcome = transaction(db, () => {
+        const current = userById.get(account.id);
+        if (current?.password_hash !== account.password_hash) throw invalidCredentials();
+        let operatorMfaVerified = false;
+        if (current.role === 'ADMIN') {
+          const enrolled = operatorMfa.isEnrolled(current.id);
+          if (!enrolled && requireAdminMfa) {
+            throw new HttpError(403, 'This operator must enroll an authenticator before signing in.', 'MFA_ENROLLMENT_REQUIRED');
+          }
+          if (enrolled) {
+            if (!operatorMfaKey) throw new HttpError(503, 'Operator authentication is temporarily unavailable.', 'MFA_UNAVAILABLE');
+            if (body.otp === undefined || body.otp === '') {
+              throw new HttpError(401, 'Enter an authenticator code or a recovery code.', 'MFA_REQUIRED');
+            }
+            operatorMfaVerified = Boolean(operatorMfa.consume(current.id, body.otp));
+            if (!operatorMfaVerified) {
+              audit(db, current.id, 'SIGN_IN_FAILED');
+              return null;
+            }
+          }
+        }
         if (upgradedHash) db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(upgradedHash, account.id);
         clearLoginWindow.run(key);
         audit(db, account.id, 'SIGNED_IN');
-        return newSession(req, account.id);
+        return newSession(req, account.id, operatorMfaVerified);
       });
+      if (!outcome) throw new HttpError(401, 'The authenticator or recovery code is invalid or has already been used.', 'INVALID_MFA_CODE');
+      return outcome;
     },
     demoLogin(req, role) {
       if (!demo) throw new HttpError(404, 'Demo access is disabled.');
@@ -213,12 +243,12 @@ export function createIdentity(db, { secureCookies, demo, clock = Date.now }) {
       return transaction(db, () => {
         const token = sessionToken(req);
         const live = token ? findSession.get(hashToken(token), clock()) : null;
-        if (live?.id !== user.id || live.password_hash !== row.password_hash) throw invalidCredentials();
+        if (live?.id !== user.id || live.password_hash !== row.password_hash || !validSession(live)) throw invalidCredentials();
         db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
         deleteUserSessions.run(user.id);
         clearLoginWindow.run(key);
         audit(db, user.id, 'PASSWORD_CHANGED');
-        return newSession(req, user.id);
+        return newSession(req, user.id, Boolean(live.operator_mfa_verified));
       });
     },
     createPrivacyRequest(user, body) {

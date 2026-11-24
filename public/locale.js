@@ -80,6 +80,8 @@ const chinese = {
   'Sign out everywhere': '退出所有设备',
   'This signs you out of World Souk & Shop on every browser and device.': '这将退出您在所有浏览器和设备上的 World Souk & Shop 账户。',
   'Change password': '更改密码',
+  'Authenticator or recovery code': '身份验证器代码或恢复代码',
+  'Enter an authenticator code or a recovery code.': '请输入身份验证器代码或恢复代码。',
   'Current password': '当前密码',
   'New password': '新密码',
   'Confirm new password': '确认新密码',

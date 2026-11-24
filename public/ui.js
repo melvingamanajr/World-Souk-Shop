@@ -40,6 +40,7 @@ export async function api(path, options = {}) {
   if (!response.ok) {
     const error = new Error(data.error?.message ?? 'Request failed. Try again.');
     error.status = response.status;
+    error.code = data.error?.code;
     throw error;
   }
   return data;

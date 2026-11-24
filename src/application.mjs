@@ -99,9 +99,10 @@ async function staticFile(req, res, pathname) {
   res.end(req.method === 'HEAD' ? undefined : content);
 }
 
-export function createApplication({ filename, demo = false, publicOrigin, commissionBps = 800, logger = console } = {}) {
+export function createApplication({ filename, demo = false, publicOrigin, commissionBps = 800, logger = console,
+  operatorMfaKey, requireAdminMfa = false } = {}) {
   const db = openDatabase(filename ?? ':memory:');
-  const identity = createIdentity(db, { secureCookies: publicOrigin?.startsWith('https:'), demo });
+  const identity = createIdentity(db, { secureCookies: publicOrigin?.startsWith('https:'), demo, operatorMfaKey, requireAdminMfa });
   const commerce = createCommerce(db, { commissionBps });
   const referrals = createReferrals(db);
   const operations = operationsModule.createOperations(db);
@@ -115,9 +116,14 @@ export function createApplication({ filename, demo = false, publicOrigin, commis
   const admin = ['ADMIN'];
   const manufacturer = ['MANUFACTURER'];
   const freight = ['FREIGHT_PARTNER', 'ADMIN'];
+  const readiness = db.prepare('SELECT name FROM schema_migrations LIMIT 1');
 
   const routes = [
-    ['GET', /^\/healthz$/, () => ({ status: db.prepare('SELECT 1 AS ok').get().ok === 1 ? 'ok' : 'down' })],
+    ['GET', /^\/healthz$/, () => ({ status: 'ok' })],
+    ['GET', /^\/readyz$/, () => {
+      if (!readiness.get()) throw new HttpError(503, 'Database is not ready.');
+      return { status: 'ready' };
+    }],
     ['GET', /^\/api\/config$/, () => ({ demo, checkoutEnabled: demo, commissionBps, currency: 'USD' })],
     ['GET', /^\/api\/catalog$/, ({ url }) => commerce.catalog(Object.fromEntries(url.searchParams))],
     ['GET', /^\/api\/categories$/, () => commerce.categories()],
@@ -200,7 +206,7 @@ export function createApplication({ filename, demo = false, publicOrigin, commis
       let url;
       try { url = new URL(req.url ?? '/', 'http://wss.invalid'); }
       catch { throw new HttpError(400, 'Invalid request URL.'); }
-      if (!url.pathname.startsWith('/api/') && url.pathname !== '/healthz') {
+      if (!url.pathname.startsWith('/api/') && !['/healthz', '/readyz'].includes(url.pathname)) {
         routeName = 'static';
         return await staticFile(req, res, url.pathname);
       }

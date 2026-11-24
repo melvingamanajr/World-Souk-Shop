@@ -10,6 +10,7 @@
     "test": "node --test",
     "backup": "node scripts/backup.mjs",
     "admin:bootstrap": "node scripts/bootstrap-admin.mjs",
+    "admin:mfa": "node scripts/enroll-operator-mfa.mjs",
     "outbox": "node src/outbox-worker.mjs",
     "outbox:status": "node src/outbox-worker.mjs --status"
   }
