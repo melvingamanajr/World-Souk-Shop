@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#102c24">
+    <meta name="description" content="Shop factory-direct, join community buying pools, and discover the manufacturers behind everyday goods.">
+    <title>World Souk &amp; Shop | Factory-direct marketplace</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+
+    <header class="site-header" id="home">
+      <div class="header-inner page-width">
+        <a class="wordmark" href="#home" aria-label="World Souk and Shop home">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <span>World Souk<span class="wordmark-small"> &amp; Shop</span></span>
+        </a>
+        <nav class="main-nav" aria-label="Main navigation">
+          <a href="#marketplace">Marketplace</a>
+          <a href="#community">Community pools</a>
+          <a href="#role-nav">Business hubs</a>
+        </nav>
+        <div class="header-actions">
+          <button class="button button-text" type="button" id="signin-button">Sign in</button>
+          <button class="button cart-button" type="button" id="cart-button">
+            <span class="bag-icon" aria-hidden="true"></span>
+            <span>Cart</span>
+            <span class="cart-count" id="cart-count">0</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main-content" tabindex="-1">
+      <section class="hero page-width" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow hero-eyebrow"><span class="spark" aria-hidden="true">✳</span> The factory-direct marketplace</p>
+          <h1 id="hero-title">Closer to<br>the <em>maker.</em></h1>
+          <p class="hero-description">Shop across borders, meet the manufacturers behind your goods, and unlock better prices when you buy together.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#marketplace">Explore the marketplace</a>
+            <a class="button hero-secondary" href="#community">Join a buying pool</a>
+          </div>
+        </div>
+        <div class="hero-visual">
+          <img class="hero-image" src="/images/souk.jpg" alt="" fetchpriority="high" width="1200" height="800">
+        </div>
+      </section>
+
+      <aside class="market-values page-width" aria-label="Marketplace benefits">
+        <div><span class="benefit-icon" aria-hidden="true">✹</span><span>Factory-direct prices</span></div>
+        <div><span class="benefit-icon" aria-hidden="true">◇</span><span>Traceable product origins</span></div>
+        <div><span class="benefit-icon" aria-hidden="true">✦</span><span>Community buying rewards</span></div>
+      </aside>
+
+      <section class="market-section page-width" id="marketplace" aria-labelledby="market-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow section-eyebrow"><span aria-hidden="true"></span> The marketplace</p>
+            <h2 id="market-title">Discover factory finds.</h2>
+          </div>
+          <p>Compare goods and prices from manufacturers around the world.</p>
+        </div>
+        <div class="catalog-controls" role="search" aria-label="Shop catalog">
+          <div class="search-control">
+            <label class="visually-hidden" for="catalog-search">Search products or manufacturers</label>
+            <input id="catalog-search" type="search" placeholder="Search products or manufacturers" autocomplete="off">
+          </div>
+          <div class="select-control">
+            <label class="visually-hidden" for="category-filter">Product category</label>
+            <select id="category-filter">
+              <option value="">All categories</option>
+            </select>
+          </div>
+          <div class="select-control">
+            <label class="visually-hidden" for="sort-filter">Sort products</label>
+            <select id="sort-filter">
+              <option value="featured">Featured</option>
+              <option value="price-asc">Price low to high</option>
+              <option value="price-desc">Price high to low</option>
+              <option value="name">Name A to Z</option>
+            </select>
+          </div>
+        </div>
+        <p class="catalog-status" id="catalog-status" role="status">Loading products…</p>
+        <div class="product-grid" id="product-grid"></div>
+        <noscript><p class="empty-state">Enable JavaScript to browse the catalog and manage your orders.</p></noscript>
+      </section>
+
+      <section class="community-section" id="community" aria-labelledby="community-title">
+        <div class="page-width community-inner">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow section-eyebrow"><span aria-hidden="true"></span> Community pools</p>
+              <h2 id="community-title">Buy better together.</h2>
+            </div>
+            <p>Combine orders with other shoppers to reach a factory’s minimum order and unlock group pricing.</p>
+          </div>
+          <div class="pool-grid" id="pool-grid"></div>
+        </div>
+      </section>
+
+      <section class="portal-section page-width" id="portal" aria-label="Account workspace" hidden></section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="page-width footer-inner">
+        <div class="footer-brand">
+          <a class="wordmark" href="#home" aria-label="World Souk and Shop home">
+            <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+            <span>World Souk<span class="wordmark-small"> &amp; Shop</span></span>
+          </a>
+          <p>A marketplace for buying directly from manufacturers around the world.</p>
+        </div>
+        <nav class="footer-nav" aria-label="Marketplace links">
+          <a href="#marketplace">Browse products</a>
+          <a href="#community">Community pools</a>
+        </nav>
+        <nav class="footer-nav" id="role-nav" aria-label="Business and operations portals">
+          <a href="#portal" data-view="manufacturer">Manufacturer hub</a>
+          <a href="#portal" data-view="freight">Freight hub</a>
+          <a href="#portal" data-view="admin">Operations</a>
+        </nav>
+      </div>
+    </footer>
+
+    <dialog class="shop-dialog" id="shop-dialog" aria-labelledby="shop-dialog-title">
+      <div class="dialog-header">
+        <h2 id="shop-dialog-title">World Souk &amp; Shop</h2>
+        <form method="dialog">
+          <button class="button close-button" type="submit" id="dialog-close" aria-label="Close dialog">&#215;</button>
+        </form>
+      </div>
+      <div class="dialog-body" id="shop-dialog-body"></div>
+    </dialog>
+    <div class="toast-status" id="toast-status" role="status" aria-live="polite" aria-atomic="true"></div>
+  </body>
+</html>

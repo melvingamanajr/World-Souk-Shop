@@ -1,0 +1,9 @@
+data/
+debug.log
+.env
+.env.*
+!.env.example
+coverage/
+node_modules/
+*.zip
+

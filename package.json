@@ -1,0 +1,13 @@
+{
+  "name": "world-souk-shop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {"node": ">=24.12.0"},
+  "scripts": {
+    "start": "node src/server.mjs",
+    "demo": "node src/server.mjs --demo",
+    "test": "node --test",
+    "backup": "node scripts/backup.mjs"
+  }
+}
