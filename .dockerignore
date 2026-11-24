@@ -1,0 +1,13 @@
+**
+!package.json
+!src/
+!src/**
+!db/
+!db/**
+!public/
+!public/**
+!scripts/
+!scripts/backup.mjs
+**/.env*
+**/*.sqlite
+**/*.sqlite-*
