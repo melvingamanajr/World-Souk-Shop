@@ -1,7 +1,9 @@
 ALTER TABLE membership_applications ADD COLUMN screened_at TEXT;
 ALTER TABLE membership_applications ADD COLUMN screening_version INTEGER CHECK (screening_version > 0);
 ALTER TABLE membership_applications ADD COLUMN screening_checks TEXT CHECK (
-    screening_checks IS NULL OR (json_valid(screening_checks) AND json_type(screening_checks) = 'array')
+    (screening_checks IS NULL AND screened_at IS NULL AND screening_version IS NULL) OR
+    (screening_checks IS NOT NULL AND screened_at IS NOT NULL AND screening_version IS NOT NULL
+      AND json_valid(screening_checks) AND json_type(screening_checks) = 'array')
 );
 ALTER TABLE membership_applications ADD COLUMN verification_confirmed INTEGER CHECK (
     verification_confirmed IS NULL OR (verification_confirmed = 1 AND requested_role <> 'CONSUMER'

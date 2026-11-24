@@ -132,6 +132,12 @@ export function createApplication({ filename, demo = false, publicOrigin, commis
       res.setHeader('Set-Cookie', identity.logout(req));
       return { user: null };
     }],
+    ['POST', /^\/api\/session\/logout-all$/, ({ user, res }) => {
+      res.setHeader('Set-Cookie', identity.logoutAll(user));
+      return { user: null };
+    }, []],
+    ['PATCH', /^\/api\/session\/password$/, async ({ req, user, res, body }) =>
+      session(res, await identity.changePassword(req, user, body)), []],
     ['POST', /^\/api\/orders$/, ({ user, body }) => {
       if (!demo) throw new HttpError(503, 'Checkout requires a configured payment provider.');
       return commerce.checkout(user.id, body);
@@ -219,6 +225,7 @@ export function createApplication({ filename, demo = false, publicOrigin, commis
       const status = Number.isInteger(error.status) && error.status >= 400 && error.status <= 499 ? error.status :
         error instanceof HttpError ? error.status : 500;
       if (status === 500) logger.error({ requestId, error });
+      if (status === 429 && Number.isInteger(error.retryAfter)) res.setHeader('Retry-After', error.retryAfter);
       json(res, status, { error: { code: status === 500 ? 'INTERNAL_ERROR' : error.code || 'REQUEST_ERROR',
         message: status === 500 ? 'Unexpected server error.' : error.message }, requestId });
     } finally {

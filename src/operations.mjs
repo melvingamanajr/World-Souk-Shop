@@ -9,6 +9,7 @@ const maxStock = 100_000_000;
 const maxUnitPrice = 100_000_000;
 const defaultReorderPoint = 10;
 const countryNames = new Intl.DisplayNames('en', { type: 'region', fallback: 'none' });
+const nonCountryCodes = new Set(['EU', 'EZ', 'QO', 'UN', 'ZZ']);
 const now = () => new Date().toISOString();
 const membershipScreeningVersion = 1;
 
@@ -55,7 +56,9 @@ function screenMembership(body, defaultName) {
   const manufacturer = requestedRole === 'MANUFACTURER';
   const freight = requestedRole === 'FREIGHT_PARTNER';
   const countryCode = code(body.countryCode, 'two-letter country code', /^[A-Z]{2}$/u, 2);
-  if (!countryNames.of(countryCode) || countryCode === 'ZZ') throw new HttpError(422, 'Enter a recognized country or territory code.');
+  if (!countryNames.of(countryCode) || nonCountryCodes.has(countryCode)) {
+    throw new HttpError(422, 'Enter a recognized country or territory code.');
+  }
   const companyName = text(body.companyName ?? (consumer ? defaultName : undefined), 'the member or company name', 150);
   const businessSummary = text(body.businessSummary, 'the business summary', 1500, { required: !consumer });
   const productionCapacity = manufacturer ? integer(body.productionCapacity, 'monthly production capacity', 1, maxStock) : null;

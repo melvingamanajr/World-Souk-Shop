@@ -1,7 +1,11 @@
 ALTER TABLE wss.membership_applications
     ADD COLUMN screened_at timestamptz,
     ADD COLUMN screening_version integer CHECK (screening_version > 0),
-    ADD COLUMN screening_checks jsonb CHECK (jsonb_typeof(screening_checks) = 'array'),
+    ADD COLUMN screening_checks jsonb CHECK (
+        (screening_checks IS NULL AND screened_at IS NULL AND screening_version IS NULL) OR
+        (screening_checks IS NOT NULL AND screened_at IS NOT NULL AND screening_version IS NOT NULL
+          AND jsonb_typeof(screening_checks) = 'array')
+    ),
     ADD COLUMN verification_confirmed boolean CHECK (
         verification_confirmed IS NULL OR (verification_confirmed AND requested_role <> 'CONSUMER'
           AND status = 'APPROVED' AND reviewer_id IS NOT NULL AND screened_at IS NOT NULL)

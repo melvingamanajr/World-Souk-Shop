@@ -129,7 +129,7 @@ test('membership approval provisions verified roles and limits access to applica
   assert.deepEqual(operations.listMemberships(shopper).map(record => record.id), [consumer.id]);
   assert.equal(operations.listMemberships(admin)[0].id, application.id);
 
-  assert.equal(operations.reviewMembership(admin, application.id, { decision: 'APPROVED' }).status, 'APPROVED');
+  assert.equal(operations.reviewMembership(admin, application.id, { decision: 'APPROVED', verificationConfirmed: true }).status, 'APPROVED');
   assert.throws(() => operations.reviewMembership(admin, application.id, { decision: 'APPROVED' }), status(409));
   const supplier = db.prepare('SELECT id, role, manufacturer_id AS manufacturerId FROM users WHERE id = ?').get(user.id);
   assert.equal(supplier.role, 'MANUFACTURER');
@@ -153,7 +153,7 @@ test('membership approval provisions verified roles and limits access to applica
   }).status, 'REJECTED');
   assert.equal(db.prepare('SELECT role FROM users WHERE id = ?').get(partner.id).role, 'CONSUMER');
   const approved = freightApplication(operations, partner);
-  operations.reviewMembership(admin, approved.id, { decision: 'APPROVED' });
+  operations.reviewMembership(admin, approved.id, { decision: 'APPROVED', verificationConfirmed: true });
   assert.equal(db.prepare('SELECT role FROM users WHERE id = ?').get(partner.id).role, 'FREIGHT_PARTNER');
   assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
 });
@@ -178,7 +178,7 @@ test('freight operations protect addresses and reconcile allowances after delive
 
   const outsider = applicant(db, 'other-carrier');
   const application = freightApplication(operations, outsider);
-  operations.reviewMembership(admin, application.id, { decision: 'APPROVED' });
+  operations.reviewMembership(admin, application.id, { decision: 'APPROVED', verificationConfirmed: true });
   const otherCarrier = db.prepare('SELECT id, role, freight_partner_id AS freightPartnerId FROM users WHERE id = ?')
     .get(outsider.id);
   assert.equal(operations.freightDashboard(otherCarrier).shipments.length, 0);

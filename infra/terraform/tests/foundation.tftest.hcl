@@ -1,0 +1,97 @@
+mock_provider "aws" {
+  override_during = plan
+
+  mock_data "aws_vpc" {
+    defaults = { enable_dns_support = true, enable_dns_hostnames = true }
+  }
+
+  mock_data "aws_route_tables" {
+    defaults = { ids = [] }
+  }
+
+  mock_data "aws_route_table" {
+    defaults = { routes = [{ gateway_id = "local" }] }
+  }
+
+  mock_data "aws_security_group" {
+    defaults = { vpc_id = "vpc-0123456789abcdef0" }
+  }
+
+  mock_data "aws_msk_bootstrap_brokers" {
+    defaults = { bootstrap_brokers_sasl_iam = "boot-test.kafka-serverless.ap-southeast-1.amazonaws.com:9098" }
+  }
+
+  mock_resource "aws_msk_serverless_cluster" {
+    defaults = { arn = "arn:aws:kafka:ap-southeast-1:123456789012:cluster/wss-test/11111111-2222-3333-4444-555555555555-s1" }
+  }
+}
+
+variables {
+  aws_region                 = "ap-southeast-1"
+  aws_account_id             = "123456789012"
+  environment                = "test"
+  vpc_id                     = "vpc-0123456789abcdef0"
+  private_subnet_ids          = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+  operator_role_arn          = "arn:aws:iam::123456789012:role/test-operator"
+  operator_security_group_id = "sg-0123456789abcdef0"
+}
+
+override_data {
+  target = data.aws_subnet.private["subnet-0123456789abcdef0"]
+  values = {
+    vpc_id                  = "vpc-0123456789abcdef0"
+    availability_zone_id    = "apse1-az1"
+    ipv6_native             = false
+    map_public_ip_on_launch = false
+  }
+}
+
+override_data {
+  target = data.aws_subnet.private["subnet-0123456789abcdef1"]
+  values = {
+    vpc_id                  = "vpc-0123456789abcdef0"
+    availability_zone_id    = "apse1-az2"
+    ipv6_native             = false
+    map_public_ip_on_launch = false
+  }
+}
+
+run "private_foundation" {
+  command = plan
+
+  assert {
+    condition     = aws_eks_cluster.foundation.vpc_config[0].endpoint_private_access && !aws_eks_cluster.foundation.vpc_config[0].endpoint_public_access
+    error_message = "The Kubernetes API must be private only."
+  }
+
+  assert {
+    condition     = !aws_eks_cluster.foundation.access_config[0].bootstrap_cluster_creator_admin_permissions
+    error_message = "The Terraform caller must not inherit cluster administrator access."
+  }
+
+  assert {
+    condition     = toset(jsondecode(aws_iam_role_policy.outbox.policy).Statement[1].Action) == toset(["kafka-cluster:DescribeTopic", "kafka-cluster:WriteData"])
+    error_message = "The relay role may describe and write its topic."
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.outbox.policy).Statement[1].Resource == "arn:aws:kafka:ap-southeast-1:123456789012:topic/wss-test/11111111-2222-3333-4444-555555555555-s1/wss.events.v1"
+    error_message = "The relay topic grant must use the exact topic ARN."
+  }
+
+  assert {
+    condition     = output.kafka_relay_environment.WSS_KAFKA_SECURITY == "iam" && endswith(output.kafka_relay_environment.WSS_KAFKA_BROKERS, ":9098")
+    error_message = "The relay uses the private IAM broker endpoint."
+  }
+}
+
+run "reject_public_subnet_route" {
+  command = plan
+
+  override_data {
+    target = data.aws_route_table.private["subnet-0123456789abcdef1"]
+    values = { routes = [{ gateway_id = "igw-0123456789abcdef0" }] }
+  }
+
+  expect_failures = [aws_eks_cluster.foundation]
+}

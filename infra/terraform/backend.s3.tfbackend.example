@@ -1,0 +1,3 @@
+bucket = "replace-with-your-restricted-versioned-state-bucket"
+key    = "world-souk/pilot/phase-one.tfstate"
+region = "ap-southeast-1"

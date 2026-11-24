@@ -245,7 +245,7 @@ export function createPortals({ portal, notify, modal, account }) {
     },
     'review-membership'(id) {
       const application = model?.memberships?.find(row => row.id === id);
-      const confirmation = `<label><input type="checkbox" name="verificationConfirmed" value="true" required>
+      const confirmation = `<label class="check-label"><input type="checkbox" name="verificationConfirmed" value="true" required>
         ${txt('I confirmed the operating details against supporting business records.')}</label>`;
       modal('review-membership', 'Review membership', `${application ? membershipDetails(application) : ''}
         <p>${txt('Automated checks validate the form. Approving a new operating role requires the applicant to sign in again.')}</p>

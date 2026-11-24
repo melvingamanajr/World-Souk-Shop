@@ -33,8 +33,8 @@ resource "aws_eks_cluster" "foundation" {
   }
 
   vpc_config {
-    subnet_ids             = var.private_subnet_ids
-    security_group_ids     = [aws_security_group.eks_operator.id]
+    subnet_ids              = var.private_subnet_ids
+    security_group_ids      = [aws_security_group.eks_operator.id]
     endpoint_private_access = true
     endpoint_public_access  = false
   }
@@ -100,7 +100,7 @@ resource "aws_iam_role_policy_attachment" "nodes" {
 
 locals {
   pod_identity_roles = {
-    cni = { namespace = "kube-system", service_account = "aws-node" }
+    cni    = { namespace = "kube-system", service_account = "aws-node" }
     outbox = { namespace = "wss", service_account = "wss-outbox" }
   }
 }

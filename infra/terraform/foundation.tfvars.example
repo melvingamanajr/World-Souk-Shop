@@ -1,0 +1,7 @@
+aws_region                 = "ap-southeast-1"
+aws_account_id             = "123456789012"
+environment                = "pilot"
+vpc_id                     = "vpc-0123456789abcdef0"
+private_subnet_ids          = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+operator_role_arn          = "arn:aws:iam::123456789012:role/wss-platform-operator"
+operator_security_group_id = "sg-0123456789abcdef0"
