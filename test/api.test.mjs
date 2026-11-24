@@ -124,3 +124,33 @@ test('demo impersonation and simulated payment are unavailable outside demo mode
   assert.equal((await request('/api/session/logout', { method: 'POST', cookie: previousCookie })).response.status, 200);
   assert.equal((await request('/api/session', { cookie: previousCookie })).body.user, null);
 });
+
+test('manufacturers open pools and valid cross-account referrals earn demo credits', async context => {
+  const { request, demoSignIn } = await fixture(context);
+  const admin = await demoSignIn('ADMIN');
+  const shopper = await demoSignIn('CONSUMER');
+  const manufacturer = await demoSignIn('MANUFACTURER');
+  const pool = { productId: 'linen-throw', title: 'Next linen circle', description: 'Demo community sale', targetQuantity: 3,
+    endsAt: new Date(Date.now() + 86400000).toISOString() };
+  assert.equal((await request('/api/pools', { method: 'POST', cookie: shopper.cookie, data: pool })).response.status, 403);
+  assert.equal((await request('/api/pools', { method: 'POST', cookie: manufacturer.cookie, data: pool })).response.status, 409);
+  const listing = await request('/api/manufacturer/products', { method: 'POST', cookie: manufacturer.cookie, data: {
+    sku: 'LF-TEST', title: 'Pool product', category: 'Home & Living', retailPriceCents: 2000, wholesalePriceCents: 1500,
+    groupPriceCents: 1250, quantityAvailable: 12
+  } });
+  assert.equal(listing.response.status, 201);
+  const opened = await request('/api/pools', { method: 'POST', cookie: manufacturer.cookie, data: { ...pool, productId: listing.body.id } });
+  assert.equal(opened.response.status, 201);
+  assert.equal(opened.body.target, 3);
+  const referral = await request('/api/referrals', { method: 'POST', cookie: admin.cookie });
+  const self = await request('/api/referrals', { method: 'POST', cookie: shopper.cookie });
+  const order = { shipping: address, idempotencyKey: 'referral-1', items: [{ productId: 'orbit-speaker', quantity: 1 }] };
+  assert.equal((await request('/api/orders', { method: 'POST', cookie: shopper.cookie, data: { ...order, referralCode: self.body.code } })).response.status, 422);
+  assert.equal((await request('/api/orders', { method: 'POST', cookie: shopper.cookie, data: { ...order, referralCode: referral.body.code } })).response.status, 201);
+  const earnings = await request('/api/referrals', { cookie: admin.cookie });
+  assert.equal(earnings.body.orderCount, 1);
+  assert.equal(earnings.body.creditedCents, 55);
+  const privacy = await request('/api/privacy', { method: 'POST', cookie: shopper.cookie, data: { kind: 'CORRECTION', detail: 'Test request' } });
+  assert.equal(privacy.response.status, 201);
+  assert.equal((await request('/api/admin/privacy', { cookie: admin.cookie })).body[0].id, privacy.body.id);
+});

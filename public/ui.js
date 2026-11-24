@@ -6,7 +6,14 @@ export const esc = value => String(value ?? '').replace(/[&<>"']/g, character =>
 })[character]);
 export const txt = key => esc(t(key));
 export const money = cents => new Intl.NumberFormat(locale(), { style: 'currency', currency: 'USD' }).format((cents ?? 0) / 100);
-export const date = value => value ? new Intl.DateTimeFormat(locale(), { dateStyle: 'medium' }).format(new Date(value)) : '—';
+export function date(value) {
+  if (!value) return '—';
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
+  const sqliteTimestamp = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value);
+  const parsed = new Date(sqliteTimestamp ? `${value.replace(' ', 'T')}Z` : value);
+  if (!Number.isFinite(parsed.valueOf())) return '—';
+  return new Intl.DateTimeFormat(locale(), { dateStyle: 'medium', ...(dateOnly ? { timeZone: 'UTC' } : {}) }).format(parsed);
+}
 export const status = value => t(String(value ?? '').toLowerCase().replaceAll('_', ' ').replace(/^./, letter => letter.toUpperCase()));
 export const image = (url, alt = '', settings = '') => /^\/images\/[a-z-]+\.jpg$/.test(url ?? '')
   ? `<img class="product-image" src="${esc(url)}" alt="${esc(alt)}" width="500" height="500" ${settings}>`

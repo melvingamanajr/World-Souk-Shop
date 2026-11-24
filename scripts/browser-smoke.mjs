@@ -117,13 +117,31 @@ try {
   await click('[data-action=switch-role]');
   await click('[data-id=ADMIN][data-action=demo-role]');
   await wait(q('form[data-form=create-shipment]') + ' !== null', 'operations freight workspace');
+  await evalPage(`${q('[name=waybill]')}.value = 'WSS-SMOKE-1'; ${q('[name=regionCode]')}.value = 'APAC'`);
+  await click('form[data-form=create-shipment] button[type=submit]');
+  await wait(q('[data-action=shipment-detail]') + ' !== null', 'shipment assignment');
+  await click('#signin-button');
+  await click('[data-action=switch-role]');
+  await click('[data-id=FREIGHT_PARTNER][data-action=demo-role]');
+  await wait(`${q('#portal h2')}?.textContent === 'Freight hub'`, 'freight member workspace');
+  await click('[data-action=shipment-detail]');
+  await change('form[data-form=shipment-event] [name=status]', 'IN_TRANSIT');
+  await click('form[data-form=shipment-event] button[type=submit]');
+  await wait(`${q('#portal')}.textContent.includes('In transit')`, 'freight tracking milestone');
+  await click('#signin-button');
+  await click('[data-action=switch-role]');
+  await click('[data-id=CONSUMER][data-action=demo-role]');
+  await wait(q('[data-action=order-detail]') + ' !== null', 'shopper order history');
+  await click('[data-action=order-detail]');
+  await wait(`${q('#shop-dialog-body')}.textContent.includes('WSS-SMOKE-1')`, 'shopper shipment timeline');
+  await click('#dialog-close');
   for (const width of [390, 320]) {
     await viewport(width);
     await wait(`innerWidth === ${width}`, 'mobile viewport');
     assert.ok(await evalPage('document.documentElement.scrollWidth <= innerWidth'), `page overflow at ${width}px`);
   }
   assert.deepEqual(errors, [], 'browser runtime errors');
-  console.log('Chromium smoke passed: storefront, keyboard focus, filtering, translation, checkout, order dialog and operations at desktop and mobile widths.');
+  console.log('Chromium smoke passed: storefront, keyboard focus, filtering, translation, checkout, role switching and shipment tracking at desktop and mobile widths.');
 } finally {
   socket?.close();
   if (browser.exitCode === null && browser.pid) {

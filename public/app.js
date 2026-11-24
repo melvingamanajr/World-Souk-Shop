@@ -172,7 +172,7 @@ function unitPrice(product, quantity) {
   return quantity >= product.wholesaleMin ? product.wholesaleCents : product.priceCents;
 }
 
-async function showCart() {
+async function showCart(focusQuantity = '') {
   modal('cart', 'Your cart', `<p role="status">${txt('Loading…')}</p>`);
   const lines = await Promise.all(cart.map(async line => ({ ...line, product: await getProduct(line.productId).catch(() => null) })));
   if (dialogView !== 'cart' || !dialog.open) return;
@@ -189,6 +189,7 @@ async function showCart() {
   }).join('');
   dialogBody.innerHTML = lines.length ? `${content}<div class="cart-total"><strong>${txt('Total')} ${money(total)}</strong>
     ${button('Checkout', 'checkout', '', 'primary', !valid || !config.checkoutEnabled)}</div>${config.checkoutEnabled ? '' : empty('Checkout is currently unavailable.')}` : empty('Your cart is empty.');
+  if (focusQuantity) [...dialogBody.querySelectorAll('[data-quantity]')].find(control => control.dataset.quantity === focusQuantity)?.focus();
 }
 
 function authenticate(next) {
@@ -349,7 +350,7 @@ document.addEventListener('change', event => {
     const line = cart.find(item => item.productId === input.dataset.quantity);
     if (line) line.quantity = Number(input.value);
     saveCart();
-    void showCart();
+    void showCart(input.dataset.quantity);
   }
   portals.change(input);
 });

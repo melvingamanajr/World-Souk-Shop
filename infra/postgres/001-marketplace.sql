@@ -119,6 +119,13 @@ CREATE TABLE pools (
     CHECK ((status = 'FUNDED') = (committed_quantity = target_quantity))
 );
 CREATE INDEX ix_pools_expiration ON pools(ends_at) WHERE status = 'OPEN';
+CREATE UNIQUE INDEX ix_pools_open_product ON pools(product_id) WHERE status = 'OPEN';
+
+CREATE TABLE affiliate_codes (
+    code text PRIMARY KEY CHECK (length(code) BETWEEN 8 AND 24),
+    referrer_id uuid NOT NULL UNIQUE REFERENCES users(id),
+    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE TABLE orders (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -138,7 +145,7 @@ CREATE TABLE orders (
     shipping_city text NOT NULL,
     shipping_postal_code text NOT NULL,
     shipping_country text NOT NULL,
-    referral_code text,
+    referral_code text REFERENCES affiliate_codes(code),
     idempotency_key text NOT NULL,
     request_hash text NOT NULL CHECK (request_hash ~ '^[a-f0-9]{64}$'),
     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -149,6 +156,7 @@ CREATE TABLE orders (
 );
 CREATE INDEX ix_orders_user ON orders(user_id, created_at DESC, id);
 CREATE INDEX ix_orders_pool ON orders(pool_id, status) WHERE pool_id IS NOT NULL;
+CREATE INDEX ix_orders_referral ON orders(referral_code, status) WHERE referral_code IS NOT NULL;
 
 CREATE TABLE order_items (
     order_id uuid NOT NULL REFERENCES orders(id),
