@@ -207,7 +207,8 @@ function showSignIn(register = false) {
 function showAccount() {
   if (!authenticate(showAccount)) return;
   modal('account', 'Your account', `<p><strong>${esc(user.name)}</strong><br>${esc(user.email)} · ${txt(roleNames[user.role] ?? user.role)}</p>
-    <div class="toolbar">${user.role === 'CONSUMER' ? button('Orders & rewards', 'workspace', 'orders', 'primary') : button('Open workspace', 'workspace', ({ MANUFACTURER: 'manufacturer', FREIGHT_PARTNER: 'freight', ADMIN: 'admin' })[user.role], 'primary')}
+    <div class="toolbar">${user.role === 'CONSUMER' ? '' : button('Open workspace', 'workspace', ({ MANUFACTURER: 'manufacturer', FREIGHT_PARTNER: 'freight', ADMIN: 'admin' })[user.role], 'primary')}
+    ${button('Orders & rewards', 'workspace', 'orders', user.role === 'CONSUMER' ? 'primary' : 'secondary')}
     ${button('Membership', 'workspace', 'memberships')}${button('Data & privacy', 'workspace', 'privacy')}
     ${button('Sign out', 'logout')}${config.demo ? button('Switch demo role', 'switch-role') : ''}</div>`);
 }
@@ -359,6 +360,11 @@ $('#dialog-close').addEventListener('click', () => { afterSignIn = undefined; })
 window.addEventListener('wss-language', () => {
   syncAccount(); renderCategories(); renderCatalog(); renderPools();
   if (view && !portal.hidden) void openPortal(view, false);
+});
+window.addEventListener('wss-catalog-update', async () => {
+  try { categories = await api('/api/categories'); renderCategories(); }
+  catch (error) { notify(error.message); }
+  await Promise.all([fetchCatalog(), refreshPools()]);
 });
 
 localizeShell();

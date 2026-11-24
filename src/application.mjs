@@ -133,10 +133,13 @@ export function createApplication({ filename, demo = false, publicOrigin, commis
       if (!demo) throw new HttpError(503, 'Checkout requires a configured payment provider.');
       return commerce.checkout(user.id, body);
     }, consumer, 201],
-    ['GET', /^\/api\/orders$/, ({ user }) => commerce.orders(user.id), consumer],
-    ['GET', /^\/api\/orders\/([\w-]+)$/, ({ user, params }) => commerce.order(user.id, params[0]), consumer],
-    ['GET', /^\/api\/orders\/([\w-]+)\/tracking$/, ({ user, params }) => ({ shipment: operations.listTracking(user, params[0]) }), consumer],
-    ['GET', /^\/api\/wallet$/, ({ user }) => commerce.wallet(user.id), consumer],
+    ['GET', /^\/api\/orders$/, ({ user }) => commerce.orders(user.id), []],
+    ['GET', /^\/api\/orders\/([\w-]+)$/, ({ user, params }) => commerce.order(user.id, params[0]), []],
+    ['GET', /^\/api\/orders\/([\w-]+)\/tracking$/, ({ user, params }) => {
+      commerce.order(user.id, params[0]);
+      return { shipment: operations.listTracking(user, params[0]) };
+    }, []],
+    ['GET', /^\/api\/wallet$/, ({ user }) => commerce.wallet(user.id), []],
     ['GET', /^\/api\/memberships$/, ({ user }) => operations.listMemberships(user), []],
     ['POST', /^\/api\/memberships$/, ({ user, body }) => operations.submitMembership(user, body), [], 201],
     ['PATCH', /^\/api\/memberships\/([\w-]+)$/, ({ user, params, body }) => operations.reviewMembership(user, params[0], body), admin],
@@ -150,6 +153,13 @@ export function createApplication({ filename, demo = false, publicOrigin, commis
     ['POST', /^\/api\/freight\/remittances$/, ({ user, body }) => operations.createRemittance(user, body), admin, 201],
     ['PATCH', /^\/api\/freight\/remittances\/([\w-]+)$/, ({ user, params }) => operations.settleRemittance(user, params[0]), admin],
     ['GET', /^\/api\/admin\/manufacturers$/, () => db.prepare('SELECT id,name,country,verified FROM manufacturers ORDER BY name').all(), admin],
+    ['GET', /^\/api\/admin\/overview$/, () => db.prepare(`SELECT COUNT(*) AS orders,
+      COALESCE(SUM(subtotal_cents), 0) AS gmvCents, COALESCE(SUM(commission_cents), 0) AS commissionCents,
+      COALESCE(SUM(platform_cents), 0) AS platformCents, COALESCE(SUM(cashback_cents), 0) AS cashbackCents,
+      COALESCE(SUM(affiliate_cents), 0) AS affiliateCents, COALESCE(SUM(community_cents), 0) AS communityCents
+      FROM orders WHERE status IN ('PAID', 'PROCESSING', 'IN_TRANSIT', 'DELIVERED')`).get(), admin],
+    ['GET', /^\/api\/admin\/privacy$/, () => db.prepare(`SELECT p.id,p.kind,p.detail,p.status,p.created_at AS createdAt,u.email
+      FROM privacy_requests p JOIN users u ON p.user_id = u.id ORDER BY p.created_at DESC LIMIT 200`).all(), admin],
     ['GET', /^\/api\/privacy$/, ({ user }) => identity.privacyRequests(user), []],
     ['POST', /^\/api\/privacy$/, ({ user, body }) => identity.createPrivacyRequest(user, body), [], 201],
     ['GET', /^\/api\/privacy\/export$/, ({ user, res }) => {
@@ -167,8 +177,6 @@ export function createApplication({ filename, demo = false, publicOrigin, commis
   const server = createServer({ requestTimeout: 15000, headersTimeout: 10000, maxHeaderSize: 8192 }, async (req, res) => {
     const requestId = randomUUID();
     const start = performance.now();
-    const url = new URL(req.url ?? '/', 'http://wss.invalid');
-    const api = url.pathname.startsWith('/api/') || url.pathname === '/healthz';
     for (const [name, value] of Object.entries({
       'Content-Security-Policy': "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self'",
       'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
@@ -176,14 +184,19 @@ export function createApplication({ filename, demo = false, publicOrigin, commis
     })) res.setHeader(name, value);
     if (publicOrigin?.startsWith('https:')) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
 
-    let routeName = api ? 'unknown' : 'static';
+    let routeName = 'unknown';
     try {
-      if (!api) return await staticFile(req, res, url.pathname);
+      let url;
+      try { url = new URL(req.url ?? '/', 'http://wss.invalid'); }
+      catch { throw new HttpError(400, 'Invalid request URL.'); }
+      if (!url.pathname.startsWith('/api/') && url.pathname !== '/healthz') {
+        routeName = 'static';
+        return await staticFile(req, res, url.pathname);
+      }
       for (const [method, path, handler, roles, status = 200] of routes) {
         const params = url.pathname.match(path)?.slice(1);
         if (method !== req.method || !params) continue;
         routeName = path.source;
-        const user = roles ? authorize(identity, req, roles.length ? roles : undefined) : null;
         let body;
         if (method !== 'GET') {
           browserOrigin(req, publicOrigin);
@@ -191,6 +204,7 @@ export function createApplication({ filename, demo = false, publicOrigin, commis
           limit(req, isLogin ? 'session' : 'mutation', isLogin ? 30 : 100, 60000);
           body = await requestObject(req);
         }
+        const user = roles ? authorize(identity, req, roles.length ? roles : undefined) : null;
         const value = await handler({ req, res, url, params, body, user });
         if (value === undefined || value === null) throw new HttpError(404, 'Record not found.');
         return json(res, status, value);
