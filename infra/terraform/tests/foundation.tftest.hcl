@@ -1,20 +1,22 @@
 mock_provider "aws" {
-  override_during = plan
-
   mock_data "aws_vpc" {
-    defaults = { enable_dns_support = true, enable_dns_hostnames = true }
+    override_during = plan
+    defaults        = { enable_dns_support = true, enable_dns_hostnames = true }
   }
 
   mock_data "aws_route_tables" {
-    defaults = { ids = [] }
+    override_during = plan
+    defaults        = { ids = [] }
   }
 
   mock_data "aws_route_table" {
-    defaults = { id = "rtb-0123456789abcdef0", routes = [{ gateway_id = "local" }] }
+    override_during = plan
+    defaults        = { id = "rtb-0123456789abcdef0", routes = [{ gateway_id = "local" }] }
   }
 
   mock_data "aws_security_group" {
-    defaults = { vpc_id = "vpc-0123456789abcdef0" }
+    override_during = plan
+    defaults        = { vpc_id = "vpc-0123456789abcdef0" }
   }
 
   mock_data "aws_msk_bootstrap_brokers" {
@@ -53,7 +55,8 @@ variables {
 }
 
 override_data {
-  target = data.aws_subnet.private["subnet-0123456789abcdef0"]
+  target          = data.aws_subnet.private["subnet-0123456789abcdef0"]
+  override_during = plan
   values = {
     vpc_id                  = "vpc-0123456789abcdef0"
     availability_zone_id    = "apse1-az1"
@@ -63,7 +66,8 @@ override_data {
 }
 
 override_data {
-  target = data.aws_subnet.private["subnet-0123456789abcdef1"]
+  target          = data.aws_subnet.private["subnet-0123456789abcdef1"]
+  override_during = plan
   values = {
     vpc_id                  = "vpc-0123456789abcdef0"
     availability_zone_id    = "apse1-az2"
@@ -105,8 +109,9 @@ run "reject_public_subnet_route" {
   command = plan
 
   override_data {
-    target = data.aws_route_table.private["subnet-0123456789abcdef1"]
-    values = { routes = [{ gateway_id = "igw-0123456789abcdef0" }] }
+    target          = data.aws_route_table.private["subnet-0123456789abcdef1"]
+    override_during = plan
+    values          = { routes = [{ gateway_id = "igw-0123456789abcdef0" }] }
   }
 
   expect_failures = [aws_eks_cluster.foundation]

@@ -44,7 +44,9 @@ flowchart LR
     SQLite --> Outbox[Transactional event outbox]
 ```
 
-The browser uses native HTML, CSS, and JavaScript. The Node server uses SQLite in WAL mode and checks migration checksums on startup. Prepared statements, role- and record-level authorization, hashed session tokens, scrypt passwords, same-origin mutation checks, and security headers provide the local application controls. The application uses one process, one currency, and a durable local data directory. The [production data design](infra/README.md) includes a PostgreSQL migration with materialized reporting views and describes the Kafka delivery and cloud integration contract.
+The browser uses native HTML, CSS, and JavaScript. The Node server uses SQLite in WAL mode and checks migration checksums on startup. Prepared statements, role- and record-level authorization, hashed session tokens, scrypt passwords, same-origin mutation checks, and security headers provide the local application controls. The API uses a single process, one currency, and a durable local data directory. The [production data design](infra/README.md) includes PostgreSQL migrations with materialized reporting views and describes the Kafka delivery and cloud integration contract.
+
+Phase 1 adds an independent Kafka relay to the transactional outbox and a [Terraform foundation](infra/terraform/README.md) for private EKS and MSK IAM. The application and relay can run together locally with one shared SQLite database. [Kafka setup](infra/README.md#kafka-event-delivery)
 
 | Setting | Default |
 | --- | --- |
@@ -54,7 +56,19 @@ The browser uses native HTML, CSS, and JavaScript. The Node server uses SQLite i
 | `WSS_COMMISSION_BPS` | `800` basis points |
 | `WSS_PUBLIC_ORIGIN` | Required to be HTTPS when running the non-demo service beyond loopback. Supply the exact browser origin and terminate TLS at the reverse proxy. |
 
-`npm start` launches the non-demo service. It starts with an empty catalog on a fresh database. Simulated checkout and demo identities are disabled in this mode. A payment adapter and operator provisioning are needed for a commercial deployment.
+`npm start` launches the non-demo service. It starts with an empty catalog on a fresh database. Simulated checkout and demo identities are disabled in this mode.
+
+## Authentication and membership
+
+Provision the first operator from a terminal with access to the non-demo database. Use the same `WSS_DB` setting as the application. Substitute the operator's real name and email. The command prompts twice for the password with terminal echo disabled. For service installation, `--password-stdin` accepts input from a local secrets manager.
+
+```sh
+npm run admin:bootstrap -- --email operator@example.test --name "Marketplace Operator"
+```
+
+The bootstrap requires a new account and permits one initial administrator. Account controls allow password changes and sign-out across devices. New passwords require 15–128 characters, and a successful sign-in upgrades an older valid password hash. Account-level throttling survives an application restart. Security audit records remain in the database and carry account IDs, action names, and times. [OWASP authentication guidance](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html) · [OWASP password storage guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+
+Membership screening records which fields passed validation. Consumers are approved automatically after screening. Manufacturer and freight applications require an administrator to confirm supporting records before granting a new role. Approval that changes the role revokes the applicant's active sessions. The applicant signs back in to access the new workspace. [Project status](STATUS.md#phase-1-foundations)
 
 ## Verification and operations
 
@@ -63,11 +77,11 @@ npm test
 npm run backup -- data/demo.sqlite data/demo-snapshot.sqlite
 ```
 
-The tests exercise the HTTP API and domain invariants, including checkout retries, inventory, pool expiry, referral credits, role isolation, membership activation, shipment milestones, remittance settlement, and report reconciliation. To run the Chromium smoke test, set `WSS_BROWSER` to a Chrome or Chromium executable and run `node scripts/browser-smoke.mjs`. It starts an isolated local application, checks keyboard focus, filter and language controls, checkout, order tracking, admin access, and responsive layout, then stops both processes.
+The tests exercise the HTTP API and domain invariants, including checkout retries, inventory, pool expiry, referral credits, role isolation, membership screening, account controls, outbox recovery, shipment milestones, remittance settlement, and report reconciliation. To run the Chromium smoke test, set `WSS_BROWSER` to a Chrome or Chromium executable and run `node scripts/browser-smoke.mjs`. It starts an isolated local application, checks keyboard focus, filter and language controls, checkout, order tracking, account controls, membership review, and responsive layout, then stops both processes.
 
 The backup command makes an online SQLite snapshot, validates integrity and foreign keys, and creates a new file on a filesystem supporting hard links. Use a new destination filename. Restore to a fresh database path, verify the backup, then point `WSS_DB` at it during the maintenance window. Treat database and backup contents as sensitive because they contain account and delivery details.
 
-The Dockerfile runs the service as a non-root user with a persistent volume. The GitHub Actions workflow tests Node releases on Windows and Linux and includes a Linux container health check.
+The Dockerfile runs the service as a non-root user with a persistent volume. The `outbox` build target includes the separately locked Kafka runtime dependencies. CI runs Node tests on Windows and Linux and defines checks for containers, PostgreSQL migrations, Kafka delivery, and Terraform plans using a mocked provider.
 
 ```sh
 docker build -t world-souk .
@@ -79,10 +93,10 @@ docker run --rm -p 127.0.0.1:3000:3000 -v world-souk:/data \
 
 | Increment | Acceptance criteria |
 | --- | --- |
-| **Production data and delivery** | Connect the application to PostgreSQL, prove concurrent inventory and retry behavior against it, publish committed outbox messages through Kafka, and exercise reporting refresh, recovery, and load targets. Provision the EKS/Terraform environment with the owner's cloud account and operating constraints. |
+| **Production data and delivery** | Connect the application to PostgreSQL, verify concurrent inventory and retry behavior against it, and exercise reporting refresh, recovery, and load targets. Plan and provision the Terraform foundation in the designated AWS account, then verify the relay with live MSK. |
 | **Commerce and freight providers** | Reconcile provider authorization, capture, failed captures, refunds, rebates, and payouts. Integrate approved 3PLs, estimate shipping and landed cost per destination, and validate customs, duties, tax invoices, and shipment SLAs for each launch corridor. |
 | **Regional pilot** | Onboard and verify real factories and carriers in the first operating corridor. Confirm the legal entity, contracts, consumer disclosures, currency and settlement rules, and escalation contacts per market. Treat the proposal's forecasts as planning assumptions. |
-| **Release assurance** | Verify privacy request fulfillment, identity and retention procedures, backup restoration, PCI obligations, service security, keyboard and screen-reader operation, contrast, and horizontal reflow before using real accounts or payment data. |
+| **Release assurance** | Set up operator MFA and account recovery. Verify privacy request fulfillment, identity and retention procedures, backup restoration, PCI obligations, service security, keyboard and screen-reader operation, contrast, and horizontal reflow before using real accounts or payment data. |
 
 The demo supplies a privacy notice, authenticated JSON data export, and a correction or erasure request intake queue. Production still requires an operator process for verification, response, retention exceptions, and fulfillment. [EU GDPR text](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32016R0679) · [California Privacy Protection Agency](https://cppa.ca.gov/faq)
 
