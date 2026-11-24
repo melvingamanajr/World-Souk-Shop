@@ -79,6 +79,10 @@ override_data {
 run "private_foundation" {
   command = apply
 
+  variables {
+    enable_pilot_ebs_csi = true
+  }
+
   assert {
     condition     = aws_eks_cluster.foundation.vpc_config[0].endpoint_private_access && !aws_eks_cluster.foundation.vpc_config[0].endpoint_public_access
     error_message = "The Kubernetes API must be private only."
@@ -102,6 +106,13 @@ run "private_foundation" {
   assert {
     condition     = output.kafka_relay_environment.WSS_KAFKA_SECURITY == "iam" && endswith(output.kafka_relay_environment.WSS_KAFKA_BROKERS, ":9098")
     error_message = "The relay uses the private IAM broker endpoint."
+  }
+
+  assert {
+    condition = aws_eks_addon.ebs_csi[0].addon_name == "aws-ebs-csi-driver" && anytrue([
+      for identity in aws_eks_addon.ebs_csi[0].pod_identity_association : identity.service_account == "ebs-csi-controller-sa"
+    ]) && endswith(aws_iam_role_policy_attachment.ebs_csi[0].policy_arn, "/AmazonEBSCSIDriverPolicyV2")
+    error_message = "The storage add-on must use its own scoped service account and EBS policy."
   }
 }
 

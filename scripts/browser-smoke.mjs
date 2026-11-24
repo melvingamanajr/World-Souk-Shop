@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { createApplication } from '../src/application.mjs';
+import { hashPassword } from '../src/identity.mjs';
+import { createOperatorMfa } from '../src/operator-mfa.mjs';
 
 const executable = process.env.WSS_BROWSER;
 if (!executable) throw new Error('Set WSS_BROWSER to a Chrome or Chromium executable.');
@@ -23,7 +25,14 @@ async function until(check, label) {
   throw new Error(`Timed out waiting for ${label}.`, { cause: lastError });
 }
 
-const { server } = createApplication({ demo: true, logger: { info() {}, error: console.error } });
+const operatorMfaKey = Buffer.alloc(32, 47);
+const operatorEmail = 'browser-operator@example.test';
+const operatorPassword = 'synthetic browser operator password';
+const { server, db } = createApplication({ demo: true, operatorMfaKey, requireAdminMfa: true, logger: { info() {}, error: console.error } });
+db.prepare("INSERT INTO users(id,email,name,password_hash,role) VALUES (?,?,?,?,'ADMIN')")
+  .run('browser-operator', operatorEmail, 'Browser Operator', await hashPassword(operatorPassword));
+const { recoveryCodes: [operatorCode] } = createOperatorMfa(db, { key: operatorMfaKey, clock: () => 59000 })
+  .enroll('browser-operator', { secret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', code: '287082' });
 server.listen(0, '127.0.0.1');
 await once(server, 'listening');
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -181,13 +190,22 @@ try {
   await click('[data-action=logout-all]');
   await click('[data-action=confirm-logout-all]');
   await wait(`${q('#signin-button')}.textContent === 'Sign in'`, 'revoked sessions');
+  await click('#signin-button');
+  await fill('form[data-form=login]', { email: operatorEmail, password: operatorPassword });
+  await click('form[data-form=login] button[type=submit]');
+  await wait(`!${q('[name=otp]')}.disabled && document.activeElement === ${q('[name=otp]')}`, 'focused MFA challenge');
+  await fill('form[data-form=login]', { otp: operatorCode });
+  await click('form[data-form=login] button[type=submit]');
+  await wait(`${q('#shop-dialog-title')}.textContent === 'Your account'`, 'verified operator account');
+  await click('[data-action=workspace][data-id=admin]');
+  await wait(`${q('#portal h2')}?.textContent === 'Operations' && !${q('#shop-dialog')}.open`, 'operator MFA sign-in');
   for (const width of [390, 320]) {
     await viewport(width);
     await wait(`innerWidth === ${width}`, 'mobile viewport');
     assert.ok(await evalPage('document.documentElement.scrollWidth <= innerWidth'), `page overflow at ${width}px`);
   }
   assert.deepEqual(errors, [], 'browser runtime errors');
-  console.log('Chromium smoke passed: shopping, shipment tracking, account controls, membership review, keyboard focus and desktop and mobile layout.');
+  console.log('Chromium smoke passed: shopping, shipment tracking, account controls, membership review, operator MFA, keyboard focus and desktop and mobile layout.');
 } finally {
   socket?.close();
   if (browser.exitCode === null && browser.pid) {

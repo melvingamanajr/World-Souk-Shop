@@ -1,0 +1,26 @@
+api:
+  image: ''
+  publicOrigin: ''
+  mfaSecret: ''
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+storage:
+  existingClaim: ''
+
+relay:
+  enabled: false
+  image: ''
+  brokers: ''
+  region: ''
+  topic: wss.events.v1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      memory: 256Mi

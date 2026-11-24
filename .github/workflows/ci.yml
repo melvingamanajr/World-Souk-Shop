@@ -36,9 +36,10 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.node == '24.x'
         run: |
           docker build --tag world-souk:ci .
-          container="$(docker run --detach --publish 127.0.0.1:13000:3000 --env WSS_PUBLIC_ORIGIN=https://shop.example.test world-souk:ci)"
+          export WSS_OPERATOR_MFA_KEY="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))')"
+          container="$(docker run --detach --publish 127.0.0.1:13000:3000 --env WSS_PUBLIC_ORIGIN=https://shop.example.test --env WSS_OPERATOR_MFA_KEY world-souk:ci)"
           trap 'docker logs "$container"; docker rm --force --volumes "$container" >/dev/null' EXIT
-          curl --fail --silent --show-error --retry 15 --retry-connrefused --retry-delay 1 http://127.0.0.1:13000/healthz
+          curl --fail --silent --show-error --retry 15 --retry-connrefused --retry-delay 1 http://127.0.0.1:13000/readyz
 
   phase-1-integrations:
     runs-on: ubuntu-latest
@@ -48,6 +49,8 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432/tcp
         options: >-
           --health-cmd pg_isready
           --health-interval 5s
@@ -61,20 +64,20 @@ jobs:
         with:
           node-version: '24.x'
           package-manager-cache: false
-      - name: Apply PostgreSQL migrations
-        env:
-          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+      - name: Install PostgreSQL and Kafka clients
         run: |
-          for migration in infra/postgres/*.sql; do
-            docker exec -i "$POSTGRES_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 --single-transaction --file=- < "$migration"
-          done
-      - name: Install Kafka transport
-        run: npm ci --prefix infra/kafka --ignore-scripts
-      - name: Verify relay against Kafka
+          npm ci --prefix infra/postgres --ignore-scripts
+          npm ci --prefix infra/kafka --ignore-scripts
+      - name: Verify both relay backends against Kafka
+        env:
+          WSS_POSTGRES_TEST_URL: postgresql://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports[5432] }}/postgres
+          WSS_POSTGRES_TLS: local
+          WSS_KAFKA_TEST_BROKERS: '127.0.0.1:19092'
         run: |
           docker compose -f infra/kafka/compose.yml up -d --wait broker
           docker compose -f infra/kafka/compose.yml run --rm topic-init
           npm run test:broker --prefix infra/kafka
+          npm run test:integration --prefix infra/postgres
       - name: Stop integration broker
         if: always()
         run: docker compose -f infra/kafka/compose.yml down --volumes
@@ -99,3 +102,20 @@ jobs:
       - run: terraform init -backend=false -input=false
       - run: terraform validate
       - run: terraform test -no-color
+
+  eks-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify Helm chart
+        run: |
+          curl --fail --silent --show-error --location https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz -o "$RUNNER_TEMP/helm.tar.gz"
+          echo "0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b  $RUNNER_TEMP/helm.tar.gz" | sha256sum -c -
+          tar -xf "$RUNNER_TEMP/helm.tar.gz" -C "$RUNNER_TEMP"
+          helm="$RUNNER_TEMP/linux-amd64/helm"
+          "$helm" lint infra/eks/pilot --strict --values infra/eks/values.example.yaml
+          "$helm" template world-souk infra/eks/pilot --namespace wss --kube-version 1.36.0 --values infra/eks/values.example.yaml > "$RUNNER_TEMP/pilot.yaml"
+          "$helm" template world-souk infra/eks/pilot --namespace wss --kube-version 1.36.0 --values infra/eks/values.example.yaml --set relay.enabled=true > "$RUNNER_TEMP/pilot-relay.yaml"

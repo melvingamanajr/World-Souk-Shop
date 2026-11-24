@@ -1,18 +1,17 @@
 # Production data and deployment foundation
 
-The application and outbox relay run on SQLite. PostgreSQL migrations define the target relational schema and reporting views for a future server adapter. The [AWS Terraform stack](terraform/README.md) defines a private EKS and MSK foundation. [Project status](../STATUS.md) records which paths have been verified.
+The marketplace API runs on SQLite. The outbox relay can independently publish from SQLite or PostgreSQL. The [AWS Terraform stack](terraform/README.md) and [Helm pilot](eks/README.md) define the private infrastructure and single-instance deployment. [Project status](../STATUS.md)
 
 ## PostgreSQL
 
-Apply the migrations once in file order to a fresh PostgreSQL 16+ database using a dedicated schema owner and migration runner. Migration 002 adds membership screening and replay keys. Migration 003 adds identity throttling and audit tables.
+Give a dedicated migration role access to a fresh PostgreSQL 16+ database. Set its `WSS_POSTGRES_URL` through the environment's secret manager. The runner applies migrations in order, serializes schema changes with an advisory lock, and tracks each checksum in `wss_migrations.applied`. Each migration and its ledger entry commit together.
 
 ```sh
-for migration in infra/postgres/*.sql; do
-  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction -f "$migration" || exit
-done
+npm ci --prefix infra/postgres
+npm run migrate --prefix infra/postgres
 ```
 
-Give the application and reporting jobs separate database credentials with grants for their specific operations in the `wss` schema. Keep migration privileges with the release runner. Use encrypted connections and managed backups. Test restoration before moving production data.
+An existing schema provisioned by older manual instructions requires a migration-history reconciliation before using the runner. Review the deployed schema and migration checksums on a restored copy, then record the verified history before permitting further migrations. Give publishing, writing, reporting, and migration roles separate credentials. Store release data and backups in the selected environment.
 
 The schema uses native UUIDs, timestamp-aware columns, integer cents, currency codes, and relational constraints. A SQLite import requires consistent ID mapping for every foreign key and event payload that uses a demo slug. Convert epoch-based session expiry and textual dates before validation. Demo identities and sessions belong in the local environment. The SQL adapter must translate SQLite placeholders, Boolean predicates, row ordering, and insert syntax before it can use this schema.
 
@@ -54,6 +53,16 @@ npm run outbox
 ```
 
 `npm run outbox -- --once` drains available batches and exits with a failure status if the lease is held or a retry is scheduled. `npm run outbox:status` reads pending count, age inputs, last success, active lease, and retry state without contacting Kafka. A sustained backlog calls for checking broker reachability, topic permissions, and worker health. The [Terraform outputs](terraform/README.md#create-the-event-topic) provide the relay environment for MSK. Build the worker container with `docker build --target outbox -t world-souk-outbox .` and give the API and relay access to the same durable database volume when using SQLite.
+
+### PostgreSQL outbox
+
+Migration 005 adds the relay lease and `wss.record_outbox_event(kind, entity, data)`. A PostgreSQL writer calls the function in the same transaction as its business write. The function locks the aggregate before assigning a sequence, so concurrent transactions for the same aggregate publish in commit order. Transactions touching multiple aggregates should acquire their locks in consistent order. The existing marketplace writes its separate SQLite outbox. [PostgreSQL advisory locks](https://www.postgresql.org/docs/16/explicit-locking.html#ADVISORY-LOCKS)
+
+Set `WSS_POSTGRES_URL` on the outbox worker to select PostgreSQL. Set `WSS_POSTGRES_CA_FILE` to the provider's CA bundle as needed. The driver verifies the server certificate by default and accepts plaintext only with `WSS_POSTGRES_TLS=local` and a literal loopback host. Use connection URLs without query parameters. [node-postgres TLS configuration](https://node-postgres.com/features/ssl)
+
+Grant the worker schema usage, `SELECT` on the outbox and relay state, `UPDATE (published_at)` on the outbox, and `UPDATE` on the relay state. The worker uses short database transactions and releases them before publishing to Kafka. A migrated PostgreSQL database with its own writers is required for PostgreSQL delivery.
+
+Run `npm run test:integration --prefix infra/postgres` with `WSS_POSTGRES_TEST_URL` set to a disposable database. Set `WSS_KAFKA_TEST_BROKERS` to the isolated local Kafka endpoint to verify actual broker acknowledgements in that test. The worker's optional `WSS_OUTBOX_HEALTH_FILE` records progress. `node src/outbox-worker.mjs --health` checks that heartbeat without reaching the broker or database.
 
 ## Deployment sequence
 

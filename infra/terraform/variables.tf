@@ -65,6 +65,12 @@ variable "node_instance_type" {
   default     = "m6i.large"
 }
 
+variable "enable_pilot_ebs_csi" {
+  description = "Manage the EBS CSI add-on and its own IAM Pod Identity for the private pilot's persistent volume."
+  type        = bool
+  default     = false
+}
+
 variable "existing_eks_auth_endpoint_id" {
   description = "Existing EKS Auth interface endpoint with private DNS. Omit to create one in the supplied subnets."
   type        = string

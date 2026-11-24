@@ -99,10 +99,12 @@ resource "aws_iam_role_policy_attachment" "nodes" {
 }
 
 locals {
-  pod_identity_roles = {
+  pod_identity_roles = merge({
     cni    = { namespace = "kube-system", service_account = "aws-node" }
     outbox = { namespace = "wss", service_account = "wss-outbox" }
-  }
+    }, var.enable_pilot_ebs_csi ? {
+    ebs_csi = { namespace = "kube-system", service_account = "ebs-csi-controller-sa" }
+  } : {})
 }
 
 resource "aws_iam_role" "pod" {
@@ -221,4 +223,29 @@ resource "aws_eks_addon" "system" {
   addon_name   = each.value
 
   depends_on = [aws_eks_node_group.foundation]
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi" {
+  count = var.enable_pilot_ebs_csi ? 1 : 0
+
+  role       = aws_iam_role.pod["ebs_csi"].name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEBSCSIDriverPolicyV2"
+}
+
+resource "aws_eks_addon" "ebs_csi" {
+  count = var.enable_pilot_ebs_csi ? 1 : 0
+
+  cluster_name = aws_eks_cluster.foundation.name
+  addon_name   = "aws-ebs-csi-driver"
+
+  pod_identity_association {
+    role_arn        = aws_iam_role.pod["ebs_csi"].arn
+    service_account = local.pod_identity_roles.ebs_csi.service_account
+  }
+
+  depends_on = [
+    aws_eks_addon.pod_identity,
+    aws_iam_role_policy_attachment.ebs_csi,
+    aws_eks_node_group.foundation,
+  ]
 }

@@ -2,7 +2,7 @@
 
 This Terraform stack provisions a private EKS control plane and AL2023 managed node group, an EKS Auth interface endpoint, and an IAM-authenticated MSK Serverless cluster in an existing VPC. It associates an IAM producer role with the `wss` namespace and `wss-outbox` service account. The role can write the configured event topic. A separate role can create that topic. EKS API and audit logs have 30-day retention. Managed nodes use encrypted disks and IMDSv2 with hop limit one. [Amazon EKS security](https://docs.aws.amazon.com/eks/latest/best-practices/security.html) · [MSK IAM resource permissions](https://docs.aws.amazon.com/msk/latest/developerguide/kafka-actions.html)
 
-The stack covers AWS infrastructure and workload identity. The application and relay still use the same SQLite database, which calls for a single application instance on a durable volume. PostgreSQL cutover and workload rollout are separate from provisioning this foundation.
+The stack covers AWS infrastructure and workload identity. Set `enable_pilot_ebs_csi = true` to install the EBS CSI add-on with a dedicated Pod Identity for the application's volume. The [Helm pilot](../eks/README.md) uses that foundation to run one API replica on retained SQLite storage and optionally run the Kafka relay alongside it.
 
 ## Inputs and network
 

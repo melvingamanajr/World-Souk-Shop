@@ -2,13 +2,15 @@ import { once } from 'node:events';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApplication } from '../src/application.mjs';
+import { bootstrapAdministrator } from '../src/identity.mjs';
+import { createOperatorMfa } from '../src/operator-mfa.mjs';
 import { allocateCommission } from '../src/commerce.mjs';
 
 const logger = { info() {}, error(event) { console.error(event.error); } };
 const address = { name: 'Sample Buyer', address: '10 Demo Street', city: 'Cebu', postalCode: '6000', country: 'Philippines' };
 
-async function fixture(testContext, demo = true) {
-  const app = createApplication({ demo, logger });
+async function fixture(testContext, demo = true, options = {}) {
+  const app = createApplication({ demo, logger, ...options });
   app.server.listen(0, '127.0.0.1');
   await once(app.server, 'listening');
   testContext.after(() => new Promise(resolve => app.server.close(resolve)));
@@ -51,6 +53,7 @@ test('storefront, catalogue, guarded roles and per-user records work over HTTP',
     await response.arrayBuffer();
   }
   assert.equal((await request('/healthz')).body.status, 'ok');
+  assert.equal((await request('/readyz')).body.status, 'ready');
   assert.equal((await request('/api/categories')).body.length, 4);
   assert.equal((await request('/api/catalog?q=shenzhen')).body[0].id, 'orbit-speaker');
   assert.deepEqual((await request('/api/catalog?q=%25')).body, []);
@@ -153,4 +156,37 @@ test('manufacturers open pools and valid cross-account referrals earn demo credi
   const privacy = await request('/api/privacy', { method: 'POST', cookie: shopper.cookie, data: { kind: 'CORRECTION', detail: 'Test request' } });
   assert.equal(privacy.response.status, 201);
   assert.equal((await request('/api/admin/privacy', { cookie: admin.cookie })).body[0].id, privacy.body.id);
+});
+
+test('operators need enrolled MFA and a valid second factor before receiving an admin session', async context => {
+  const operatorMfaKey = Buffer.alloc(32, 43);
+  const { request, db } = await fixture(context, false, { operatorMfaKey, requireAdminMfa: true });
+  const password = 'a synthetic operator password for tests';
+  const email = 'mfa-operator@example.test';
+  const operator = await bootstrapAdministrator(db, { email, name: 'Test Operator', password });
+  const login = (data = {}) => request('/api/session/login', { method: 'POST', data: { email, password, ...data } });
+  const unregistered = await login();
+  assert.equal(unregistered.response.status, 403);
+  assert.equal(unregistered.body.error.code, 'MFA_ENROLLMENT_REQUIRED');
+  assert.equal(unregistered.cookie, undefined);
+
+  const mfa = createOperatorMfa(db, { key: operatorMfaKey, clock: () => 59000 });
+  const { recoveryCodes } = mfa.enroll(operator.id, { secret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', code: '287082' });
+  const challenge = await login();
+  assert.equal(challenge.response.status, 401);
+  assert.equal(challenge.body.error.code, 'MFA_REQUIRED');
+  assert.equal(challenge.cookie, undefined);
+  const invalid = await login({ otp: '00000x' });
+  assert.equal(invalid.body.error.code, 'INVALID_MFA_CODE');
+  const verified = await login({ otp: recoveryCodes[0] });
+  assert.equal(verified.response.status, 200);
+  assert.equal((await request('/api/admin/overview', { cookie: verified.cookie })).response.status, 200);
+  assert.equal(db.prepare('SELECT operator_mfa_verified AS verified FROM sessions WHERE user_id = ?').get(operator.id).verified, 1);
+
+  const reused = await login({ otp: recoveryCodes[0] });
+  assert.equal(reused.body.error.code, 'INVALID_MFA_CODE');
+  const recoveredAgain = await login({ otp: recoveryCodes[1] });
+  assert.equal(recoveredAgain.response.status, 200);
+  assert.equal((await request('/api/admin/overview', { cookie: verified.cookie })).response.status, 401);
+  assert.equal((await request('/api/admin/overview', { cookie: recoveredAgain.cookie })).response.status, 200);
 });

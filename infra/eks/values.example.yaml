@@ -1,0 +1,14 @@
+api:
+  image: registry.example.test/world-souk/api:0.1.0
+  publicOrigin: https://shop-pilot.example.test
+  mfaSecret: wss-operator-mfa
+
+storage:
+  existingClaim: world-souk-pilot-data
+
+relay:
+  enabled: false
+  image: registry.example.test/world-souk/outbox:0.1.0
+  brokers: example.broker.kafka-serverless.ap-southeast-1.amazonaws.com:9098
+  region: ap-southeast-1
+  topic: wss.events.v1

@@ -11,12 +11,15 @@ COPY package.json ./
 COPY src/ ./src/
 COPY db/ ./db/
 COPY public/ ./public/
-COPY scripts/backup.mjs scripts/bootstrap-admin.mjs ./scripts/
+COPY scripts/backup.mjs scripts/bootstrap-admin.mjs scripts/enroll-operator-mfa.mjs scripts/terminal-secret.mjs ./scripts/
 
 FROM base AS outbox
 COPY infra/kafka/package.json infra/kafka/package-lock.json ./infra/kafka/
-RUN npm ci --prefix infra/kafka --omit=dev --ignore-scripts
+COPY infra/postgres/package.json infra/postgres/package-lock.json ./infra/postgres/
+RUN npm ci --prefix infra/kafka --omit=dev --ignore-scripts \
+    && npm ci --prefix infra/postgres --omit=dev --ignore-scripts
 COPY infra/kafka/transport.mjs ./infra/kafka/
+COPY infra/postgres/connection.mjs infra/postgres/transaction.mjs infra/postgres/outbox-store.mjs ./infra/postgres/
 USER node
 VOLUME ["/data"]
 CMD ["node", "src/outbox-worker.mjs"]

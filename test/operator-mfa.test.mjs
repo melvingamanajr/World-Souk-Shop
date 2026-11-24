@@ -157,9 +157,11 @@ test('rotation replaces old recovery codes and revokes sessions only after valid
   const { secret } = mfa.prepareEnrollment(administratorId);
   assert.throws(() => mfa.enroll(administratorId, { secret, code: 'invalid' }), { code: 'INVALID_MFA_CODE' });
   assert.throws(() => mfa.enroll(administratorId, { secret: `${secret}\n`, code: '123456' }), { code: 'INVALID_MFA_SECRET' });
+  const currentCode = authenticatorCode(secret, clock());
+  assert.throws(() => mfa.enroll(administratorId, { secret, code: currentCode, replaceExisting: false }), { code: 'MFA_ALREADY_ENROLLED' });
   assert.deepEqual(sessionIds(), ['established']);
   assert.equal(db.prepare('SELECT count(*) AS count FROM operator_mfa_audit').get().count, 1);
-  const { recoveryCodes } = mfa.enroll(administratorId, { secret, code: authenticatorCode(secret, clock()) });
+  const { recoveryCodes } = mfa.enroll(administratorId, { secret, code: currentCode, replaceExisting: true });
   assert.deepEqual(sessionIds(), []);
   assert.equal(mfa.consume(administratorId, previousCodes[0]), false);
   assert.equal(mfa.consume(administratorId, recoveryCodes[0]), 'recovery');

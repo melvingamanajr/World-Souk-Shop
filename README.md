@@ -46,7 +46,7 @@ flowchart LR
 
 The browser uses native HTML, CSS, and JavaScript. The Node server uses SQLite in WAL mode and checks migration checksums on startup. Prepared statements, role- and record-level authorization, hashed session tokens, scrypt passwords, same-origin mutation checks, and security headers provide the local application controls. The API uses a single process, one currency, and a durable local data directory. The [production data design](infra/README.md) includes PostgreSQL migrations with materialized reporting views and describes the Kafka delivery and cloud integration contract.
 
-Phase 1 adds an independent Kafka relay to the transactional outbox and a [Terraform foundation](infra/terraform/README.md) for private EKS and MSK IAM. The application and relay can run together locally with one shared SQLite database. [Kafka setup](infra/README.md#kafka-event-delivery)
+Phase 1 adds a Kafka relay, a [Terraform foundation](infra/terraform/README.md) for private EKS and MSK IAM, and a [Helm pilot](infra/eks/README.md). Run the application and relay against one SQLite database, or give an independent worker a PostgreSQL outbox. [Kafka setup](infra/README.md#kafka-event-delivery)
 
 | Setting | Default |
 | --- | --- |
@@ -55,6 +55,8 @@ Phase 1 adds an independent Kafka relay to the transactional outbox and a [Terra
 | `WSS_DB` | `data/demo.sqlite` in demo mode and `data/world-souk.sqlite` otherwise |
 | `WSS_COMMISSION_BPS` | `800` basis points |
 | `WSS_PUBLIC_ORIGIN` | Required to be HTTPS when running the non-demo service beyond loopback. Supply the exact browser origin and terminate TLS at the reverse proxy. |
+| `WSS_OPERATOR_MFA_KEY` | Base64-encoded 32-byte key from the environment's secret manager. Required for the HTTPS deployment and for explicitly enforced MFA. |
+| `WSS_REQUIRE_ADMIN_MFA` | Set to `1` to enforce operator MFA on a local non-demo service. The API enforces MFA automatically when configured with an HTTPS public origin. |
 
 `npm start` launches the non-demo service. It starts with an empty catalog on a fresh database. Simulated checkout and demo identities are disabled in this mode.
 
@@ -67,6 +69,16 @@ npm run admin:bootstrap -- --email operator@example.test --name "Marketplace Ope
 ```
 
 The bootstrap requires a new account and permits one initial administrator. Account controls allow password changes and sign-out across devices. New passwords require 15–128 characters, and a successful sign-in upgrades an older valid password hash. Account-level throttling survives an application restart. Security audit records remain in the database and carry account IDs, action names, and times. [OWASP authentication guidance](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html) · [OWASP password storage guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+
+### Operator MFA
+
+Set `WSS_OPERATOR_MFA_KEY` on the API and in the private enrollment terminal. Generate a different `randomBytes(32).toString('base64')` value per environment and store it in the secret manager. Keep the key with the environment's backup and recovery plan. The CLI displays setup and recovery secrets once in the private terminal.
+
+```sh
+npm run admin:mfa -- --email operator@example.test
+```
+
+Add the manual secret in an authenticator app and confirm enrollment with a current code. Save the single-use recovery codes in a separate private location. The enrollment uses that authenticator code, so sign in with the next code. Any previously active operator sessions are revoked. To replace a lost authenticator after verifying the operator's identity, a trusted host administrator can rerun the command with `--replace`. A recovery code is a second factor and still requires the account password. Using one revokes the operator's other sessions. [RFC 6238](https://www.rfc-editor.org/rfc/rfc6238) · [OWASP MFA guidance](https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html)
 
 Membership screening records which fields passed validation. Consumers are approved automatically after screening. Manufacturer and freight applications require an administrator to confirm supporting records before granting a new role. Approval that changes the role revokes the applicant's active sessions. The applicant signs back in to access the new workspace. [Project status](STATUS.md#phase-1-foundations)
 
@@ -86,7 +98,7 @@ The Dockerfile runs the service as a non-root user with a persistent volume. The
 ```sh
 docker build -t world-souk .
 docker run --rm -p 127.0.0.1:3000:3000 -v world-souk:/data \
-  -e WSS_PUBLIC_ORIGIN=https://shop.example.test world-souk
+  -e WSS_PUBLIC_ORIGIN=https://shop.example.test -e WSS_OPERATOR_MFA_KEY world-souk
 ```
 
 ## Launch backlog
@@ -96,7 +108,7 @@ docker run --rm -p 127.0.0.1:3000:3000 -v world-souk:/data \
 | **Production data and delivery** | Connect the application to PostgreSQL, verify concurrent inventory and retry behavior against it, and exercise reporting refresh, recovery, and load targets. Plan and provision the Terraform foundation in the designated AWS account, then verify the relay with live MSK. |
 | **Commerce and freight providers** | Reconcile provider authorization, capture, failed captures, refunds, rebates, and payouts. Integrate approved 3PLs, estimate shipping and landed cost per destination, and validate customs, duties, tax invoices, and shipment SLAs for each launch corridor. |
 | **Regional pilot** | Onboard and verify real factories and carriers in the first operating corridor. Confirm the legal entity, contracts, consumer disclosures, currency and settlement rules, and escalation contacts per market. Treat the proposal's forecasts as planning assumptions. |
-| **Release assurance** | Set up operator MFA and account recovery. Verify privacy request fulfillment, identity and retention procedures, backup restoration, PCI obligations, service security, keyboard and screen-reader operation, contrast, and horizontal reflow before using real accounts or payment data. |
+| **Release assurance** | Verify production MFA enrollment and password recovery procedures. Verify privacy request fulfillment, retention, backup restoration, PCI obligations, service security, keyboard and screen-reader operation, contrast, and horizontal reflow before using real accounts or payment data. |
 
 The demo supplies a privacy notice, authenticated JSON data export, and a correction or erasure request intake queue. Production still requires an operator process for verification, response, retention exceptions, and fulfillment. [EU GDPR text](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32016R0679) · [California Privacy Protection Agency](https://cppa.ca.gov/faq)
 

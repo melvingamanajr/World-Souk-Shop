@@ -1,0 +1,7 @@
+apiVersion: v2
+name: world-souk-pilot
+description: Private single-replica World Souk & Shop pilot for EKS
+type: application
+version: 0.1.0
+appVersion: '0.1.0'
+kubeVersion: '>=1.29.0-0'

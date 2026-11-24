@@ -1,0 +1,163 @@
+{{- $name := .Release.Name -}}
+{{- $apiImage := required "Set api.image to a published API image" .Values.api.image -}}
+{{- $origin := required "Set api.publicOrigin to the HTTPS proxy origin" .Values.api.publicOrigin -}}
+{{- $secret := required "Set api.mfaSecret to the existing MFA key Secret" .Values.api.mfaSecret -}}
+{{- $claim := required "Set storage.existingClaim to the retained SQLite PVC" .Values.storage.existingClaim -}}
+{{- if not (regexMatch "^https://[A-Za-z0-9.-]+(:[1-9][0-9]{0,4})?$" $origin) -}}
+{{- fail "api.publicOrigin must be a bare HTTPS origin without a path" -}}
+{{- end -}}
+{{- $relay := .Values.relay.enabled -}}
+{{- if and $relay (ne .Release.Namespace "wss") -}}
+{{- fail "The relay uses the Terraform Pod Identity in the wss namespace" -}}
+{{- end -}}
+{{- $account := ternary "wss-outbox" (printf "%s-api" $name) $relay -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $account }}
+  namespace: {{ .Release.Namespace }}
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: world-souk-shop
+      app.kubernetes.io/instance: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: world-souk-shop
+        app.kubernetes.io/instance: {{ $name }}
+    spec:
+      serviceAccountName: {{ $account }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 90
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: {{ $apiImage | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: WSS_HOST
+              value: 0.0.0.0
+            - name: WSS_PORT
+              value: '3000'
+            - name: WSS_DB
+              value: /data/world-souk.sqlite
+            - name: WSS_PUBLIC_ORIGIN
+              value: {{ $origin | quote }}
+            - name: WSS_REQUIRE_ADMIN_MFA
+              value: '1'
+            - name: WSS_OPERATOR_MFA_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret | quote }}
+                  key: key
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources: {{- toYaml .Values.api.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+        {{- if $relay }}
+        - name: outbox
+          image: {{ required "Set relay.image when enabling the relay" .Values.relay.image | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: WSS_DB
+              value: /data/world-souk.sqlite
+            - name: WSS_KAFKA_SECURITY
+              value: iam
+            - name: WSS_KAFKA_BROKERS
+              value: {{ required "Set relay.brokers to the private MSK bootstrap brokers" .Values.relay.brokers | quote }}
+            - name: WSS_KAFKA_AWS_REGION
+              value: {{ required "Set relay.region to the MSK region" .Values.relay.region | quote }}
+            - name: WSS_KAFKA_TOPIC
+              value: {{ .Values.relay.topic | quote }}
+            - name: WSS_OUTBOX_HEALTH_FILE
+              value: /tmp/wss-outbox-alive
+          startupProbe:
+            exec:
+              command: [node, src/outbox-worker.mjs, --health]
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            exec:
+              command: [node, src/outbox-worker.mjs, --health]
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources: {{- toYaml .Values.relay.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: relay-tmp
+              mountPath: /tmp
+        {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $claim | quote }}
+        {{- if $relay }}
+        - name: relay-tmp
+          emptyDir:
+            sizeLimit: 32Mi
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: world-souk-shop
+    app.kubernetes.io/instance: {{ $name }}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
