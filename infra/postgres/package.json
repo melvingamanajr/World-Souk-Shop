@@ -1,0 +1,17 @@
+{
+  "name": "world-souk-postgres",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.12.0"
+  },
+  "scripts": {
+    "migrate": "node migrate.mjs",
+    "test": "node --test connection.test.mjs",
+    "test:integration": "node outbox-smoke.mjs"
+  },
+  "dependencies": {
+    "pg": "8.23.0"
+  }
+}
