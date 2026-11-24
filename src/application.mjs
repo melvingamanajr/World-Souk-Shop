@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { openDatabase } from './database.mjs';
 import { createIdentity } from './identity.mjs';
 import { createCommerce } from './commerce.mjs';
+import { createReferrals } from './referrals.mjs';
 import * as operationsModule from './operations.mjs';
 import { seedDemo } from './seed.mjs';
 import { HttpError } from './http-error.mjs';
@@ -102,6 +103,7 @@ export function createApplication({ filename, demo = false, publicOrigin, commis
   const db = openDatabase(filename ?? ':memory:');
   const identity = createIdentity(db, { secureCookies: publicOrigin?.startsWith('https:'), demo });
   const commerce = createCommerce(db, { commissionBps });
+  const referrals = createReferrals(db);
   const operations = operationsModule.createOperations(db);
   if (demo) {
     seedDemo(db);
@@ -121,6 +123,7 @@ export function createApplication({ filename, demo = false, publicOrigin, commis
     ['GET', /^\/api\/categories$/, () => commerce.categories()],
     ['GET', /^\/api\/catalog\/([\w-]+)$/, ({ params }) => commerce.product(params[0])],
     ['GET', /^\/api\/pools$/, () => commerce.pools()],
+    ['POST', /^\/api\/pools$/, ({ user, body }) => commerce.createPool(user, body), manufacturer, 201],
     ['GET', /^\/api\/session$/, ({ req }) => ({ user: identity.user(req) })],
     ['POST', /^\/api\/session\/register$/, async ({ req, res, body }) => session(res, await identity.register(req, body)), null, 201],
     ['POST', /^\/api\/session\/login$/, async ({ req, res, body }) => session(res, await identity.login(req, body))],
@@ -140,6 +143,8 @@ export function createApplication({ filename, demo = false, publicOrigin, commis
       return { shipment: operations.listTracking(user, params[0]) };
     }, []],
     ['GET', /^\/api\/wallet$/, ({ user }) => commerce.wallet(user.id), []],
+    ['GET', /^\/api\/referrals$/, ({ user }) => { commerce.expirePools(); return referrals.account(user.id); }, []],
+    ['POST', /^\/api\/referrals$/, ({ user }) => referrals.activate(user.id), [], 201],
     ['GET', /^\/api\/memberships$/, ({ user }) => operations.listMemberships(user), []],
     ['POST', /^\/api\/memberships$/, ({ user, body }) => operations.submitMembership(user, body), [], 201],
     ['PATCH', /^\/api\/memberships\/([\w-]+)$/, ({ user, params, body }) => operations.reviewMembership(user, params[0], body), admin],
@@ -165,7 +170,7 @@ export function createApplication({ filename, demo = false, publicOrigin, commis
     ['GET', /^\/api\/privacy\/export$/, ({ user, res }) => {
       res.setHeader('Content-Disposition', 'attachment; filename="world-souk-data.json"');
       return { user, orders: commerce.orders(user.id), wallet: commerce.wallet(user.id),
-        memberships: operations.listMemberships({ ...user, role: 'CONSUMER' }), requests: identity.privacyRequests(user) };
+        memberships: operations.listMemberships({ ...user, role: 'CONSUMER' }), referrals: referrals.account(user.id), requests: identity.privacyRequests(user) };
     }, []]
   ];
 

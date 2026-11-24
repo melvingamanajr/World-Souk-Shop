@@ -14,6 +14,12 @@ if (values.demo && !['127.0.0.1', '::1', 'localhost'].includes(host)) throw new 
 if (!values.demo && !['127.0.0.1', '::1', 'localhost'].includes(host) && !publicOrigin?.startsWith('https:')) {
   throw new Error('An HTTPS WSS_PUBLIC_ORIGIN is required when serving beyond loopback.');
 }
-const { server } = createApplication({ filename, demo: values.demo, commissionBps, publicOrigin });
+const { server, commerce } = createApplication({ filename, demo: values.demo, commissionBps, publicOrigin });
+const maintenance = setInterval(() => {
+  try { commerce.expirePools(); }
+  catch (error) { console.error('Pool expiration failed', error.code ?? error.name); }
+}, 60000);
+maintenance.unref();
+server.once('close', () => clearInterval(maintenance));
 server.listen(port, host, () => console.info(`World Souk & Shop is listening at http://${host}:${port}${values.demo ? ' (local demo)' : ''}`));
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => server.close());

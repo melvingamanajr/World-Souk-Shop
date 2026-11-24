@@ -263,6 +263,13 @@ export function createCommerce(db, { commissionBps = 800 } = {}) {
         return hydrateOrder(existing)
       }
 
+      if (request.referralCode) {
+        const referrer = db.prepare('SELECT referrer_id AS id FROM affiliate_codes WHERE code = ?').get(request.referralCode)
+        if (!referrer || referrer.id === userId) {
+          throw new HttpError(422, 'Enter a referral code from another account.', 'INVALID_REFERRAL')
+        }
+      }
+
       const poolId = request.items[0].poolId
       const pool = poolId ? db.prepare('SELECT * FROM pools WHERE id = ?').get(poolId) : null
       if (poolId && (!pool || pool.product_id !== request.items[0].productId)) {
@@ -378,6 +385,37 @@ export function createCommerce(db, { commissionBps = 800 } = {}) {
       .all().map(toPool)
   }
 
+  function createPool(actor, body) {
+    const productId = requiredText(body.productId, 'Product ID', 128)
+    const title = requiredText(body.title, 'Pool title', 120)
+    const description = requiredText(body.description, 'Pool description', 600)
+    const target = body.targetQuantity
+    if (!Number.isInteger(target) || target < 2 || target > 10000) {
+      throw new HttpError(422, 'Set a pool target between 2 and 10000 units.')
+    }
+    const endsAt = new Date(body.endsAt)
+    const now = Date.now()
+    if (!Number.isFinite(endsAt.valueOf()) || endsAt.valueOf() <= now || endsAt.valueOf() > now + 90 * 86400000) {
+      throw new HttpError(422, 'Choose a close date within the next 90 days.')
+    }
+    expirePools()
+    return transaction(db, () => {
+      const product = db.prepare(`${PRODUCT_SELECT} WHERE p.id = ? AND p.active = 1 AND m.verified = 1 AND m.id = ?`)
+        .get(productId, actor.manufacturerId)
+      if (!product || actor.role !== 'MANUFACTURER') throw new HttpError(404, 'Product not found.')
+      if (product.quantity_available < target) throw new HttpError(409, 'The pool target exceeds available stock.')
+      if (product.group_price_cents >= product.retail_price_cents) throw new HttpError(422, 'Set a group price below the retail price first.')
+      if (db.prepare("SELECT 1 FROM pools WHERE product_id = ? AND status = 'OPEN'").get(productId)) {
+        throw new HttpError(409, 'An open pool already exists for this product.')
+      }
+      const id = randomUUID()
+      db.prepare('INSERT INTO pools(id,product_id,title,description,target_quantity,ends_at) VALUES (?,?,?,?,?,?)')
+        .run(id, productId, title, description, target, endsAt.toISOString())
+      recordEvent(db, 'pool.created', id, { poolId: id, productId, target })
+      return toPool(db.prepare(`${POOL_SELECT} AND po.id = ?`).get(id))
+    })
+  }
+
   function orders(userId) {
     expirePools()
     return db.prepare('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC, rowid DESC')
@@ -407,5 +445,5 @@ export function createCommerce(db, { commissionBps = 800 } = {}) {
       ORDER BY p.category`).all().map(row => row.category)
   }
 
-  return { catalog, categories, product, pools, checkout, orders, order, wallet, expirePools }
+  return { catalog, categories, product, pools, createPool, checkout, orders, order, wallet, expirePools }
 }

@@ -9,7 +9,8 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $runtimeCheck = "const [major,minor]=process.versions.node.split('.').map(Number); process.exit((major>24 || major===24 && minor>=12) && typeof require('node:sqlite').backup==='function' ? 0 : 1)"
 
 function Test-NodeRuntime([string]$Executable) {
-    & $Executable -e $runtimeCheck 2>$null | Out-Null
+    $ErrorActionPreference = 'Continue'
+    & $Executable --no-warnings -e $runtimeCheck 2>$null | Out-Null
     return $LASTEXITCODE -eq 0
 }
 
@@ -52,6 +53,7 @@ try {
     $env:WSS_PORT = "$Port"
     $env:WSS_DB = Join-Path $projectRoot 'data\demo.sqlite'
     $env:WSS_PUBLIC_ORIGIN = $null
+    $ErrorActionPreference = 'Continue'
     & $runtime 'src\server.mjs' --demo | ForEach-Object { Write-Output $_ }
     if ($LASTEXITCODE -ne 0) { throw "World Souk & Shop exited with code $LASTEXITCODE." }
 } finally {
