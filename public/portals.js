@@ -58,22 +58,40 @@ function manufacturerWorkspace(data) {
       ${batches.length ? table(['Lot', 'Product', 'Materials', 'Units', 'Date'], batches.map(batch => [esc(batch.lotCode), txt(batch.productTitle), esc(batch.materialInput), batch.quantityProduced, date(batch.createdAt)])) : empty('No production batches recorded.')}`)}`;
 }
 
+const screeningLabels = {
+  MEMBER_NAME_PROVIDED: 'Member or business name provided',
+  COUNTRY_CODE_RECOGNIZED: 'Country or territory code recognized',
+  BUSINESS_SUMMARY_PROVIDED: 'Business summary provided',
+  PRODUCTION_CAPACITY_VALID: 'Positive monthly production capacity provided',
+  QUALITY_CONTROLS_PROVIDED: 'Quality controls described',
+  COMPLIANCE_REFERENCE_PROVIDED: 'Compliance reference provided',
+  TRANSPORT_REGIONS_PROVIDED: 'Operating regions described',
+  WAREHOUSING_PROVIDED: 'Warehousing described',
+  COLD_CHAIN_DECLARED: 'Cold chain availability declared'
+};
+
 function membershipDetails(application) {
+  const { screening } = application;
   return `<details class="review-details"><summary>${txt('Application details')}</summary>
     <p>${esc(application.applicantName)} · ${esc(application.applicantEmail)} · ${esc(application.countryCode)}</p>
     <p>${esc(application.businessSummary)}</p>
     ${application.productionCapacity ? `<p>${txt('Monthly production capacity')} ${application.productionCapacity}<br>${txt('Quality controls')} ${esc(application.qualityControls)}<br>${txt('Compliance reference')} ${esc(application.complianceReference)}</p>` : ''}
     ${application.transportRegions ? `<p>${txt('Operating regions')} ${esc(application.transportRegions)}<br>${txt('Warehousing')} ${esc(application.warehousing)}<br>${txt('Cold chain')} ${txt(application.coldChain ? 'Yes' : 'No')}</p>` : ''}
+    ${screening ? `<p><strong>${txt('Automated form checks')}</strong> · ${date(screening.screenedAt)}</p>
+      <ul>${screening.checks.map(check => `<li>${txt(screeningLabels[check] ?? check)}</li>`).join('')}</ul>` :
+      `<p>${txt('Submitted before automated screening was recorded. Pending applications are screened at approval.')}</p>`}
   </details>`;
 }
 
 function membershipTable(applications, admin = false) {
   if (!applications.length) return empty('No membership applications yet.');
-  const columns = ['Member', 'Tier', 'Submitted', 'Status', 'Review'];
+  const columns = ['Member', 'Tier', 'Submitted', 'Status', 'Screening', 'Review'];
   if (admin) columns.push('Actions');
   return table(columns, applications.map(application => [
     esc(application.companyName), txt(role(application.requestedRole)), date(application.createdAt), badge(application.status),
-    `${application.reviewNote ? esc(application.reviewNote) : '—'}${admin ? membershipDetails(application) : ''}`,
+    application.screening ? txt('Passed form checks') : txt('No recorded checks'),
+    `${application.verificationConfirmed ? `<p>${txt('Supporting records confirmed')}</p>` : ''}
+      ${application.reviewNote ? `<p>${esc(application.reviewNote)}</p>` : ''}${admin ? membershipDetails(application) : ''}`,
     ...(admin ? [application.status === 'PENDING' ? button('Review', 'review-membership', application.id) : '—'] : [])
   ]));
 }
@@ -91,7 +109,7 @@ function membershipWorkspace(applications, user) {
   const freight = `<fieldset class="form-grid role-fields" data-membership-fields="FREIGHT_PARTNER" hidden disabled><legend>${txt('Freight details')}</legend>
     ${field('transportRegions', 'Operating regions', 'required maxlength="500"')}${field('warehousing', 'Warehousing', 'required maxlength="500"')}
     ${select('coldChain', 'Cold chain service', [['false', 'No'], ['true', 'Yes']])}</fieldset>`;
-  return `${heading('Membership')}${panel('Membership pre-survey', actionForm('apply-membership', base + manufacturer + freight, 'Submit application'))}
+  return `${heading('Membership')}${panel('Membership pre-survey', `<p>${txt('Consumer membership is free and approved when the form passes its checks. Manufacturer and freight applications also require review of supporting business records.')}</p>${actionForm('apply-membership', base + manufacturer + freight, 'Submit application')}`)}
     ${panel('Application history', membershipTable(applications))}`;
 }
 
@@ -141,10 +159,14 @@ export function createPortals({ portal, notify, modal, account }) {
   let active;
   let model;
   let revision = 0;
+  const membershipAttempts = new WeakMap();
 
   const pages = {
     async orders() { return ordersWorkspace(...await Promise.all([api('/api/orders'), api('/api/wallet')])); },
-    async memberships() { return membershipWorkspace(await api('/api/memberships'), account()); },
+    async memberships() {
+      const memberships = await api('/api/memberships');
+      return { data: { memberships }, html: membershipWorkspace(memberships, account()) };
+    },
     async manufacturer() {
       const data = await api('/api/manufacturer');
       return { data, html: manufacturerWorkspace(data) };
@@ -187,6 +209,13 @@ export function createPortals({ portal, notify, modal, account }) {
   }
 
   function change(input) {
+    if (input.name === 'decision' && input.form?.dataset.form === 'review-membership') {
+      const approval = input.value === 'APPROVED';
+      const confirmation = $('[name=verificationConfirmed]', input.form);
+      confirmation.disabled = confirmation.closest('label').hidden = !approval;
+      confirmation.required = approval;
+      $('[name=note]', input.form).required = !approval;
+    }
     if (input.name !== 'requestedRole') return;
     const parent = input.form;
     $('[data-business-summary]', parent).required = input.value !== 'CONSUMER';
@@ -216,8 +245,12 @@ export function createPortals({ portal, notify, modal, account }) {
     },
     'review-membership'(id) {
       const application = model?.memberships?.find(row => row.id === id);
-      modal('review-membership', 'Review membership', `${application ? membershipDetails(application) : ''}${actionForm('review-membership',
-        select('decision', 'Decision', [['APPROVED', 'Approve'], ['REJECTED', 'Reject']]) + textarea('note', 'Review notes', 'maxlength="1000"'), 'Record decision', id)}`);
+      const confirmation = `<label><input type="checkbox" name="verificationConfirmed" value="true" required>
+        ${txt('I confirmed the operating details against supporting business records.')}</label>`;
+      modal('review-membership', 'Review membership', `${application ? membershipDetails(application) : ''}
+        <p>${txt('Automated checks validate the form. Approving a new operating role requires the applicant to sign in again.')}</p>
+        ${actionForm('review-membership', select('decision', 'Decision', [['APPROVED', 'Approve'], ['REJECTED', 'Reject']]) +
+          confirmation + textarea('note', 'Notes to the applicant', 'maxlength="1000"'), 'Record decision', id)}`);
     },
     'shipment-detail'(id) {
       const shipment = model.shipments.find(row => row.id === id);
@@ -258,6 +291,14 @@ export function createPortals({ portal, notify, modal, account }) {
       const [method, path, message] = mutations[name];
       const body = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, numeric.has(key) ? Number(value) : key === 'coldChain' ? value === 'true' : value]));
       if (name === 'create-pool') body.endsAt = new Date(body.endsAt).toISOString();
+      if (name === 'apply-membership') {
+        const payload = JSON.stringify(body);
+        if (membershipAttempts.get(form)?.payload !== payload) {
+          membershipAttempts.set(form, { payload, key: crypto.randomUUID() });
+        }
+        body.idempotencyKey = membershipAttempts.get(form).key;
+      }
+      if (name === 'review-membership') body.verificationConfirmed = values.verificationConfirmed === 'true';
       const destination = active;
       await api(path(endpointKey(form.dataset.id)), { method, body });
       const dialog = form.closest('dialog');

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { recordEvent } from './commerce.mjs';
 import { transaction } from './database.mjs';
 import { HttpError } from './http-error.mjs';
@@ -8,8 +8,9 @@ const shipmentStatuses = ['PROCESSING', 'IN_TRANSIT', 'DELIVERED'];
 const maxStock = 100_000_000;
 const maxUnitPrice = 100_000_000;
 const defaultReorderPoint = 10;
-const countryNames = new Intl.DisplayNames('en', { type: 'region' });
+const countryNames = new Intl.DisplayNames('en', { type: 'region', fallback: 'none' });
 const now = () => new Date().toISOString();
+const membershipScreeningVersion = 1;
 
 function requireRole(actor, ...roles) {
   if (!actor) throw new HttpError(401, 'Sign in to continue.');
@@ -46,6 +47,30 @@ function code(value, label, pattern, max) {
   const result = text(value, label, max).toUpperCase();
   if (!pattern.test(result)) throw new HttpError(422, `Enter a valid ${label}.`);
   return result;
+}
+
+function screenMembership(body, defaultName) {
+  const requestedRole = pick(body.requestedRole, membershipRoles, 'Choose a membership tier.');
+  const consumer = requestedRole === 'CONSUMER';
+  const manufacturer = requestedRole === 'MANUFACTURER';
+  const freight = requestedRole === 'FREIGHT_PARTNER';
+  const countryCode = code(body.countryCode, 'two-letter country code', /^[A-Z]{2}$/u, 2);
+  if (!countryNames.of(countryCode) || countryCode === 'ZZ') throw new HttpError(422, 'Enter a recognized country or territory code.');
+  const companyName = text(body.companyName ?? (consumer ? defaultName : undefined), 'the member or company name', 150);
+  const businessSummary = text(body.businessSummary, 'the business summary', 1500, { required: !consumer });
+  const productionCapacity = manufacturer ? integer(body.productionCapacity, 'monthly production capacity', 1, maxStock) : null;
+  const qualityControls = manufacturer ? text(body.qualityControls, 'the quality controls', 1000) : '';
+  const complianceReference = manufacturer ? text(body.complianceReference, 'the compliance reference', 500) : '';
+  const transportRegions = freight ? text(body.transportRegions, 'the operating regions', 500) : '';
+  const warehousing = freight ? text(body.warehousing, 'the warehousing capacity', 500) : '';
+  if (freight && typeof body.coldChain !== 'boolean') throw new HttpError(422, 'Specify whether cold chain service is available.');
+  const coldChain = freight ? body.coldChain : null;
+  const checks = ['MEMBER_NAME_PROVIDED', 'COUNTRY_CODE_RECOGNIZED'];
+  if (!consumer) checks.push('BUSINESS_SUMMARY_PROVIDED');
+  if (manufacturer) checks.push('PRODUCTION_CAPACITY_VALID', 'QUALITY_CONTROLS_PROVIDED', 'COMPLIANCE_REFERENCE_PROVIDED');
+  if (freight) checks.push('TRANSPORT_REGIONS_PROVIDED', 'WAREHOUSING_PROVIDED', 'COLD_CHAIN_DECLARED');
+  return { requestedRole, companyName, countryCode, businessSummary, productionCapacity, qualityControls,
+    complianceReference, transportRegions, coldChain, warehousing, checks };
 }
 
 function productFields(body, current = {}) {
@@ -92,11 +117,20 @@ const readMembership = `
          ma.business_summary AS businessSummary, ma.production_capacity AS productionCapacity,
          ma.quality_controls AS qualityControls, ma.compliance_reference AS complianceReference,
          ma.transport_regions AS transportRegions, ma.cold_chain AS coldChain, ma.warehousing,
-         ma.status, ma.review_note AS reviewNote, ma.reviewed_at AS reviewedAt, ma.created_at AS createdAt
+         ma.status, ma.review_note AS reviewNote, ma.reviewed_at AS reviewedAt, ma.created_at AS createdAt,
+         ma.screened_at AS screenedAt, ma.screening_version AS screeningVersion, ma.screening_checks AS screeningChecks,
+         ma.verification_confirmed AS verificationConfirmed
   FROM membership_applications ma
   JOIN users u ON u.id = ma.applicant_id`;
 
-const mapMembership = row => ({ ...row, coldChain: row.coldChain === null ? null : Boolean(row.coldChain) });
+function mapMembership({ screenedAt, screeningVersion, screeningChecks, verificationConfirmed, ...row }) {
+  return {
+    ...row,
+    coldChain: row.coldChain === null ? null : Boolean(row.coldChain),
+    verificationConfirmed: verificationConfirmed === 1,
+    screening: screenedAt ? { version: screeningVersion, screenedAt, checks: JSON.parse(screeningChecks) } : null
+  };
+}
 
 const readShipment = `
   SELECT s.id, s.order_id AS orderId, s.freight_partner_id AS freightPartnerId,
@@ -245,6 +279,9 @@ export function createOperations(db) {
       db.prepare("UPDATE users SET role = 'FREIGHT_PARTNER', freight_partner_id = ? WHERE id = ?")
         .run(profileId, application.applicantId);
     }
+    if (applicant.role !== application.requestedRole) {
+      db.prepare('DELETE FROM sessions WHERE user_id = ?').run(application.applicantId);
+    }
   }
 
   return {
@@ -360,27 +397,34 @@ export function createOperations(db) {
 
     submitMembership(actor, body) {
       requireRole(actor, ...membershipRoles);
-      const role = pick(body.requestedRole, membershipRoles, 'Choose a membership tier.');
-      if (actor.role !== 'CONSUMER' && actor.role !== role) {
-        throw new HttpError(409, 'The application must match your current operating role.');
-      }
-      const consumer = role === 'CONSUMER';
-      const manufacturer = role === 'MANUFACTURER';
-      const freight = role === 'FREIGHT_PARTNER';
-      const country = code(body.countryCode, 'two-letter country code', /^[A-Z]{2}$/u, 2);
-      const company = text(body.companyName ?? (consumer ? actor.name : undefined), 'the member or company name', 150);
-      const summary = text(body.businessSummary, 'the business summary', 1500, { required: !consumer });
-      const capacity = manufacturer ? integer(body.productionCapacity, 'monthly production capacity', 1, maxStock) : null;
-      const controls = manufacturer ? text(body.qualityControls, 'the quality controls', 1000) : '';
-      const compliance = manufacturer ? text(body.complianceReference, 'the compliance reference', 500) : '';
-      const regions = freight ? text(body.transportRegions, 'the operating regions', 500) : '';
-      const warehousing = freight ? text(body.warehousing, 'the warehousing capacity', 500) : '';
-      if (freight && typeof body.coldChain !== 'boolean') throw new HttpError(422, 'Specify whether cold chain service is available.');
+      const { checks, ...application } = screenMembership(body, actor.name);
+      const { requestedRole, companyName, countryCode, businessSummary, productionCapacity, qualityControls,
+        complianceReference, transportRegions, coldChain, warehousing } = application;
+      const consumer = requestedRole === 'CONSUMER';
+      const requestKey = body.idempotencyKey === undefined ? null : text(body.idempotencyKey, 'the submission key', 100);
+      const requestHash = requestKey ? createHash('sha256').update(JSON.stringify(application)).digest('hex') : null;
       return transaction(db, () => {
+        const previous = requestKey && db.prepare(`SELECT application_id, request_hash FROM membership_submission_keys
+          WHERE applicant_id = ? AND request_key = ?`).get(actor.id, requestKey);
+        if (previous) {
+          if (previous.request_hash !== requestHash) throw new HttpError(409, 'This submission key belongs to a different application.');
+          return mapMembership(membershipById.get(previous.application_id));
+        }
+        if (actor.role !== 'CONSUMER' && actor.role !== requestedRole) {
+          throw new HttpError(409, 'The application must match your current operating role.');
+        }
+        const saveRequestKey = id => {
+          if (!requestKey) return;
+          db.prepare(`INSERT INTO membership_submission_keys (applicant_id, request_key, request_hash, application_id)
+            VALUES (?, ?, ?, ?)`).run(actor.id, requestKey, requestHash, id);
+        };
         if (consumer) {
           const existing = db.prepare(`${readMembership} WHERE ma.applicant_id = ?
             AND ma.requested_role = 'CONSUMER' AND ma.status = 'APPROVED'`).get(actor.id);
-          if (existing) return mapMembership(existing);
+          if (existing) {
+            saveRequestKey(existing.id);
+            return mapMembership(existing);
+          }
         } else if (db.prepare("SELECT 1 FROM membership_applications WHERE applicant_id = ? AND status = 'PENDING'").get(actor.id)) {
           throw new HttpError(409, 'You already have an application waiting for review.');
         }
@@ -389,11 +433,14 @@ export function createOperations(db) {
         const timestamp = now();
         db.prepare(`INSERT INTO membership_applications
           (id, applicant_id, requested_role, company_name, country_code, business_summary, production_capacity,
-           quality_controls, compliance_reference, transport_regions, cold_chain, warehousing, status, reviewed_at, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(id, actor.id, role, company, country, summary, capacity, controls, compliance, regions,
-            freight ? Number(body.coldChain) : null, warehousing, status, consumer ? timestamp : null, timestamp);
-        recordEvent(db, 'MembershipSubmitted', id, { applicationId: id, requestedRole: role, status }, timestamp);
+           quality_controls, compliance_reference, transport_regions, cold_chain, warehousing, status, reviewed_at, created_at,
+           screened_at, screening_version, screening_checks)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(id, actor.id, requestedRole, companyName, countryCode, businessSummary, productionCapacity, qualityControls,
+            complianceReference, transportRegions, coldChain === null ? null : Number(coldChain), warehousing, status,
+            consumer ? timestamp : null, timestamp, timestamp, membershipScreeningVersion, JSON.stringify(checks));
+        saveRequestKey(id);
+        recordEvent(db, 'MembershipSubmitted', id, { applicationId: id, requestedRole, status }, timestamp);
         return mapMembership(membershipById.get(id));
       });
     },
@@ -403,13 +450,23 @@ export function createOperations(db) {
       const decision = pick(body.decision, ['APPROVED', 'REJECTED'], 'Choose approval or rejection.');
       const note = text(body.note, 'the review note', 1000, { required: decision === 'REJECTED' });
       return transaction(db, () => {
-        const application = membershipById.get(id);
-        if (!application) throw new HttpError(404, 'This application could not be found.');
-        if (application.status !== 'PENDING') throw new HttpError(409, 'This application already has a decision.');
-        if (decision === 'APPROVED') activateProfile(application);
+        const row = membershipById.get(id);
+        if (!row) throw new HttpError(404, 'This application could not be found.');
+        if (row.status !== 'PENDING') throw new HttpError(409, 'This application already has a decision.');
+        const application = mapMembership(row);
         const timestamp = now();
-        db.prepare(`UPDATE membership_applications SET status = ?, reviewer_id = ?, review_note = ?, reviewed_at = ?
-          WHERE id = ?`).run(decision, actor.id, note, timestamp, id);
+        const approvedBusiness = decision === 'APPROVED' && application.requestedRole !== 'CONSUMER';
+        if (approvedBusiness) {
+          if (body.verificationConfirmed !== true) throw new HttpError(422, 'Confirm the supporting business records before approving.');
+          if (!application.screening) {
+            const { checks } = screenMembership(application, application.applicantName);
+            db.prepare(`UPDATE membership_applications SET screened_at = ?, screening_version = ?, screening_checks = ?
+              WHERE id = ?`).run(timestamp, membershipScreeningVersion, JSON.stringify(checks), id);
+          }
+          activateProfile(application);
+        }
+        db.prepare(`UPDATE membership_applications SET status = ?, reviewer_id = ?, review_note = ?, reviewed_at = ?,
+          verification_confirmed = ? WHERE id = ?`).run(decision, actor.id, note, timestamp, approvedBusiness ? 1 : null, id);
         recordEvent(db, 'MembershipReviewed', id, {
           applicationId: id, requestedRole: application.requestedRole, status: decision
         }, timestamp);

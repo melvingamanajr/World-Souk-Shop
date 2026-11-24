@@ -2,6 +2,8 @@
 
 World Souk & Shop connects buyers directly with manufacturers. This repository implements a local marketplace from the October 2026 v2.1 proposal, with consumer, manufacturer, freight partner, and administrator workflows. The demo uses fictional businesses, original generated product photography, and simulated payments and settlement.
 
+[Project status](STATUS.md) tracks the proposal milestones, verification, and deployment dependencies.
+
 ## Run the demo
 
 From the project folder on Windows, use the launcher. It looks for Node.js 24.12+ first and can use a compatible VS Code runtime when Node.js is missing. The execution policy override applies to this PowerShell process.
