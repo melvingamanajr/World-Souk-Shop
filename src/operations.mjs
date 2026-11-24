@@ -301,6 +301,11 @@ export function createOperations(db) {
           throw new HttpError(422, 'Wholesale and group prices must be at or below the retail price.');
         }
         const timestamp = now();
+        if (fields.groupPriceCents !== previous.groupPriceCents
+          && db.prepare(`SELECT 1 FROM pools WHERE product_id = ? AND status = 'OPEN'
+             AND committed_quantity > 0 AND ends_at > ? LIMIT 1`).get(id, timestamp)) {
+          throw new HttpError(409, 'The group price is fixed while an active community pool has commitments.');
+        }
         db.prepare(`UPDATE products SET retail_price_cents = ?, wholesale_price_cents = ?, wholesale_min = ?,
           group_price_cents = ?, unit_cost_cents = ?, quantity_available = ? WHERE id = ? AND manufacturer_id = ?`)
           .run(fields.retailPriceCents, fields.wholesalePriceCents, fields.wholesaleMin, fields.groupPriceCents,
