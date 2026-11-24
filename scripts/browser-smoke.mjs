@@ -93,7 +93,7 @@ try {
   await wait(`document.querySelectorAll('.product-card').length === 1`, 'category filter');
   await click('#language-toggle');
   assert.equal(await evalPage('document.documentElement.lang'), 'zh-CN');
-  assert.match(await evalPage(`${q('.product-card h3')}.textContent`), /扬声器/);
+  assert.match(await evalPage(`${q('.product-card h3')}.textContent`), /Orbit 便携音箱/);
   await click('#language-toggle');
   assert.equal(await evalPage('document.documentElement.lang'), 'en');
   await click('[data-action=add]');

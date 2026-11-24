@@ -420,6 +420,7 @@ th { background: #ecf0e5; }
 details summary { cursor: pointer; }
 details[open] > summary { margin-bottom: .65rem; }
 .review-details { min-width: 12rem; }
+.referral-link { display: grid; gap: .4rem; margin-bottom: 1rem; max-width: 40rem; }
 @media (max-width: 35rem) {
   .product-detail-layout { grid-template-columns: 1fr; }
   .product-detail-layout img { max-height: 13rem; }

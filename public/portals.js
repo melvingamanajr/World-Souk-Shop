@@ -51,7 +51,7 @@ function manufacturerWorkspace(data) {
     ${panel('Inventory & pricing', `${reorderAlerts.length ? `<p class="form-error">${txt('Reorder alert')} · ${reorderAlerts.map(product => txt(product.title)).join(', ')}</p>` : ''}
       ${products.length ? table(['Product', 'SKU', 'Available', 'Reorder point', 'Retail', 'Wholesale', 'Group', 'Actions'], products.map(product => [txt(product.title), esc(product.sku), product.quantityAvailable, product.reorderPoint,
     money(product.retailPriceCents), money(product.wholesalePriceCents), money(product.groupPriceCents), button('Edit', 'edit-product', product.id)])) : empty('List your first product to add it to the marketplace.')}
-      <div class="toolbar workspace-toolbar">${button('List a product', 'create-product', '', 'primary')}</div>`)}
+      <div class="toolbar workspace-toolbar">${button('List a product', 'create-product', '', 'primary')}${products.length ? button('Create a buying pool', 'create-pool') : ''}</div>`)}
     ${panel('Production batches', `${products.length ? actionForm('batch', select('productId', 'Product', products.map(product => [product.id, product.title])) +
       field('lotCode', 'Lot code', 'required maxlength="80"') + field('materialInput', 'Raw materials', 'required maxlength="1000"') +
       number('quantityProduced', 'Units produced', '', 1) + textarea('note', 'Batch notes', 'maxlength="500"'), 'Record batch') : ''}
@@ -130,6 +130,13 @@ function privacyWorkspace(requests) {
     ${requests.length ? table(['Type', 'Date', 'Status'], requests.map(request => [esc(status(request.kind)), date(request.createdAt), badge(request.status)])) : ''}`)}`;
 }
 
+function referralWorkspace(data) {
+  const link = data.code ? `${location.origin}/?ref=${encodeURIComponent(data.code)}` : '';
+  return `${heading('Referrals')}${panel('Referral link', data.code ? `<label class="referral-link">${txt('Share this link with another shopper')}
+    <input readonly value="${esc(link)}"></label>${stats([['Referred orders', data.orderCount], ['Credited rewards', money(data.creditedCents)], ['Pending rewards', money(data.pendingCents)]])}` :
+    `<p>${txt('Create a link and earn a demo affiliate credit from eligible orders placed by other shoppers.')}</p>${actionForm('activate-referral', '', 'Create referral link')}`)}`;
+}
+
 export function createPortals({ portal, notify, modal, account }) {
   let active;
   let model;
@@ -156,7 +163,8 @@ export function createPortals({ portal, notify, modal, account }) {
       return { data: { ...freight, memberships }, html: heading('Operations') + adminPanel(overview) +
         panel('Membership review', membershipTable(memberships, true)) + freightPanels(freight, manufacturers, true) + privacyPanel };
     },
-    async privacy() { return privacyWorkspace(await api('/api/privacy')); }
+    async privacy() { return privacyWorkspace(await api('/api/privacy')); },
+    async referrals() { return referralWorkspace(await api('/api/referrals')); }
   };
 
   async function open(name) {
@@ -201,6 +209,11 @@ export function createPortals({ portal, notify, modal, account }) {
         field('title', 'Product name', 'required maxlength="150"') + field('category', 'Category', 'required maxlength="80"') +
         textarea('description', 'Description', 'maxlength="1500"') + productNumbers(), 'Publish listing'));
     },
+    'create-pool'() {
+      modal('create-pool', 'Create a buying pool', actionForm('create-pool', select('productId', 'Product', model.products.map(product => [product.id, product.title])) +
+        field('title', 'Pool title', 'required maxlength="120"') + textarea('description', 'Description', 'required maxlength="600"') +
+        number('targetQuantity', 'Units to fund', '', 2, 10000) + field('endsAt', 'Closing date and time', 'required type="datetime-local"'), 'Open buying pool'));
+    },
     'review-membership'(id) {
       const application = model?.memberships?.find(row => row.id === id);
       modal('review-membership', 'Review membership', `${application ? membershipDetails(application) : ''}${actionForm('review-membership',
@@ -223,6 +236,7 @@ export function createPortals({ portal, notify, modal, account }) {
   const mutations = {
     'edit-product': ['PATCH', id => `/api/manufacturer/products/${id}`, 'Product updated.'],
     'create-product': ['POST', () => '/api/manufacturer/products', 'Product listed.'],
+    'create-pool': ['POST', () => '/api/pools', 'Buying pool opened.'],
     batch: ['POST', () => '/api/manufacturer/batches', 'Batch recorded.'],
     'apply-membership': ['POST', () => '/api/memberships', 'Membership submitted.'],
     'review-membership': ['PATCH', id => `/api/memberships/${id}`, 'Decision recorded.'],
@@ -230,10 +244,11 @@ export function createPortals({ portal, notify, modal, account }) {
     'shipment-event': ['POST', id => `/api/freight/shipments/${id}/events`, 'Shipment updated.'],
     'create-remittance': ['POST', () => '/api/freight/remittances', 'Remittance recorded.'],
     'settle-remittance': ['PATCH', id => `/api/freight/remittances/${id}`, 'Remittance settled.'],
-    privacy: ['POST', () => '/api/privacy', 'Privacy request received.']
+    privacy: ['POST', () => '/api/privacy', 'Privacy request received.'],
+    'activate-referral': ['POST', () => '/api/referrals', 'Referral link created.']
   };
   const numeric = new Set(['retailPriceCents', 'wholesalePriceCents', 'groupPriceCents', 'unitCostCents', 'wholesaleMin', 'quantityAvailable',
-    'expectedQuantityAvailable', 'reorderPoint', 'quantityProduced', 'productionCapacity', 'amountCents', 'defectAllowanceCents']);
+    'expectedQuantityAvailable', 'reorderPoint', 'quantityProduced', 'productionCapacity', 'amountCents', 'defectAllowanceCents', 'targetQuantity']);
 
   return {
     open, change,
@@ -242,12 +257,13 @@ export function createPortals({ portal, notify, modal, account }) {
       if (!Object.hasOwn(mutations, name)) return;
       const [method, path, message] = mutations[name];
       const body = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, numeric.has(key) ? Number(value) : key === 'coldChain' ? value === 'true' : value]));
+      if (name === 'create-pool') body.endsAt = new Date(body.endsAt).toISOString();
       const destination = active;
       await api(path(endpointKey(form.dataset.id)), { method, body });
       const dialog = form.closest('dialog');
       if (dialog?.open) dialog.close();
       notify(message);
-      if (['edit-product', 'create-product', 'batch'].includes(name)) window.dispatchEvent(new Event('wss-catalog-update'));
+      if (['edit-product', 'create-product', 'create-pool', 'batch'].includes(name)) window.dispatchEvent(new Event('wss-catalog-update'));
       if (destination === active && account()) await open(active);
     }
   };

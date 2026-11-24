@@ -1,5 +1,5 @@
 import { $, api, button, date, empty, esc, field, formMessage, image, money, runForm, status, submit, table, txt } from './ui.js';
-import { localizeShell, t } from './locale.js';
+import { locale, localizeShell, t } from './locale.js';
 import { createPortals } from './portals.js';
 
 const catalog = $('#product-grid');
@@ -27,6 +27,8 @@ let searchTimer;
 let afterSignIn;
 let groupSelection;
 let retryDetails;
+const referral = new URLSearchParams(location.search).get('ref')?.toUpperCase() ?? '';
+const referralPrefill = /^WSS-[A-F0-9]{16}$/.test(referral) ? referral : '';
 
 function loadCart() {
   try {
@@ -94,9 +96,13 @@ async function fetchCatalog() {
   catalogRequest?.abort();
   const controller = new AbortController();
   catalogRequest = controller;
-  const params = new URLSearchParams({ q: search.value.trim(), category: category.value, sort: sort.value });
+  const term = search.value.trim();
+  const localizedSearch = locale() === 'zh-CN' && /\p{Script=Han}/u.test(term);
+  const params = new URLSearchParams({ q: localizedSearch ? '' : term, category: category.value, sort: sort.value });
   try {
     visibleProducts = await api(`/api/catalog?${params}`, { signal: controller.signal });
+    if (localizedSearch) visibleProducts = visibleProducts.filter(product =>
+      [product.title, product.description, product.manufacturer, product.country, product.category].some(value => t(value).includes(term)));
     for (const product of visibleProducts) products.set(product.id, product);
     renderCatalog();
   } catch (error) {
@@ -209,7 +215,7 @@ function showAccount() {
   modal('account', 'Your account', `<p><strong>${esc(user.name)}</strong><br>${esc(user.email)} · ${txt(roleNames[user.role] ?? user.role)}</p>
     <div class="toolbar">${user.role === 'CONSUMER' ? '' : button('Open workspace', 'workspace', ({ MANUFACTURER: 'manufacturer', FREIGHT_PARTNER: 'freight', ADMIN: 'admin' })[user.role], 'primary')}
     ${button('Orders & rewards', 'workspace', 'orders', user.role === 'CONSUMER' ? 'primary' : 'secondary')}
-    ${button('Membership', 'workspace', 'memberships')}${button('Data & privacy', 'workspace', 'privacy')}
+    ${button('Membership', 'workspace', 'memberships')}${button('Referrals', 'workspace', 'referrals')}${button('Data & privacy', 'workspace', 'privacy')}
     ${button('Sign out', 'logout')}${config.demo ? button('Switch demo role', 'switch-role') : ''}</div>`);
 }
 
@@ -241,7 +247,7 @@ function showCheckout(poolLine = null) {
     ${field('city', 'City', 'required maxlength="100" autocomplete="shipping address-level2"')}
     ${field('postalCode', 'Postal code', 'required maxlength="30" autocomplete="shipping postal-code"')}
     ${field('country', 'Country', 'required maxlength="100" autocomplete="shipping country-name"')}
-    ${field('referralCode', 'Referral code (optional)', 'maxlength="80"')}${formMessage}
+    ${field('referralCode', 'Referral code (optional)', `maxlength="80" value="${esc(referralPrefill)}"`)}${formMessage}
     <div class="form-actions">${submit('Place demo order')}${button(pool ? 'Back to pool' : 'Back to cart', pool ? 'join' : 'cart', pool?.id)}</div></form>`);
 }
 
@@ -359,6 +365,7 @@ dialog.addEventListener('cancel', () => { afterSignIn = undefined; });
 $('#dialog-close').addEventListener('click', () => { afterSignIn = undefined; });
 window.addEventListener('wss-language', () => {
   syncAccount(); renderCategories(); renderCatalog(); renderPools();
+  if (search.value.trim()) void fetchCatalog();
   if (view && !portal.hidden) void openPortal(view, false);
 });
 window.addEventListener('wss-catalog-update', async () => {
